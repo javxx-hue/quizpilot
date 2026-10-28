@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Send, Sun, Moon, Key, Menu, X, Sparkles, HelpCircle, LogIn, Crown, User, LogOut } from 'lucide-react';
+import React, { useState } from 'react';
+import { Send, Sun, Moon, Key, Menu, X, Sparkles, HelpCircle, LogIn, LogOut } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Language, getTranslations } from '../../lib/i18n';
 import { ApiKeyModal } from './ApiKeyModal';
-import { UserTier, UserProfile } from '../../types';
-import { getCurrentUser, logoutUser, subscribeStorage } from '../../lib/storage';
+import { useAuth } from '../../lib/auth';
 import { toast } from '../ui/Toast';
 
 interface NavbarProps {
@@ -17,8 +16,7 @@ interface NavbarProps {
   onOpenCreateModal: () => void;
   onOpenAuthModal: () => void;
   onOpenOnboarding: () => void;
-  userTier: UserTier;
-  onOpenPaymentModal: (plan?: UserTier) => void;
+  onOpenBeta: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,21 +29,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCreateModal,
   onOpenAuthModal,
   onOpenOnboarding,
-  userTier,
-  onOpenPaymentModal,
+  onOpenBeta,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
-  const [currentUser, setCurrentUserState] = useState<UserProfile | null>(getCurrentUser());
+  const { user: currentUser, signOut } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const t = getTranslations(lang);
-
-  useEffect(() => {
-    const unsub = subscribeStorage(() => {
-      setCurrentUserState(getCurrentUser());
-    });
-    return () => unsub();
-  }, []);
 
   const navLinks = [
     { label: t.nav.features, route: '#features' },
@@ -55,6 +45,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     { label: t.nav.examSimulator, route: '/exam-simulator' },
     { label: t.nav.dashboard, route: '/dashboard' },
   ];
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success(lang === 'uz' ? 'Tizimdan chiqdingiz' : 'Signed out');
+    } catch {
+      toast.error(lang === 'uz' ? 'Chiqishda xatolik' : 'Sign out failed');
+    }
+  };
 
   const handleLinkClick = (route: string) => {
     setMobileMenuOpen(false);
@@ -191,8 +190,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <div className="text-xs font-bold text-foreground truncate">{currentUser.name}</div>
                       <div className="text-[11px] text-muted-foreground truncate">{currentUser.email}</div>
                       <div className="mt-1 flex items-center gap-1.5">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${userTier !== 'free' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-secondary text-muted-foreground'}`}>
-                          {userTier !== 'free' ? '⭐ PRO Rejim' : 'Oddiy tarif'}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                          Beta
                         </span>
                         {currentUser.provider === 'google' && (
                           <span className="text-[10px] text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-1 rounded font-medium">Google</span>
@@ -208,21 +207,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                     >
                       {lang === 'uz' ? 'Mening to\'plamlarim' : 'My Study Sets'}
                     </button>
-                    <button
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        onOpenPaymentModal(userTier !== 'free' ? userTier : 'pro');
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-secondary rounded-xl font-medium"
-                    >
-                      {lang === 'uz' ? 'Obunani boshqarish' : 'Subscription'}
-                    </button>
                     <div className="border-t border-border/60 mt-1 pt-1">
                       <button
                         onClick={() => {
-                          logoutUser();
                           setUserMenuOpen(false);
-                          toast.success(lang === 'uz' ? 'Tizimdan chiqdingiz' : 'Signed out');
+                          handleSignOut();
                         }}
                         className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl font-semibold flex items-center gap-1.5"
                       >
@@ -250,25 +239,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               </Button>
             )}
 
-            {/* Pro Badge or Upgrade CTA */}
-            {userTier === 'free' ? (
-              <button
-                onClick={() => onOpenPaymentModal('pro')}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-secondary hover:bg-secondary/80 border border-border text-xs font-semibold text-foreground transition-colors"
-              >
-                <Crown size={14} className="text-amber-500" />
-                <span>{lang === 'uz' ? 'PRO ga o\'tish' : 'Upgrade'}</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => onOpenPaymentModal(userTier)}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-800 dark:text-amber-300 font-bold text-xs shadow-xs hover:border-amber-500 transition-all"
-                title="PRO Obunani ko'rish"
-              >
-                <Crown size={14} className="text-amber-500" />
-                <span>⭐ PRO A'ZO</span>
-              </button>
-            )}
+            {/* Beta badge (payments are not live yet) */}
+            <button
+              onClick={onOpenBeta}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs font-semibold text-emerald-700 dark:text-emerald-300 transition-colors"
+            >
+              <Sparkles size={14} />
+              <span>{lang === 'uz' ? 'Beta: bepul' : 'Beta: free'}</span>
+            </button>
 
             {/* Create CTA Button */}
             <Button
@@ -305,16 +283,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             ))}
             <div className="pt-2 flex flex-col gap-2 border-t border-border/70">
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenPaymentModal('pro');
-                }}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl"
-              >
-                <Crown size={16} className="text-amber-500" />
-                {userTier === 'free' ? (lang === 'uz' ? 'PRO tarifiga o\'tish' : 'Upgrade to PRO') : '⭐ PRO A\'ZO'}
-              </button>
               {currentUser ? (
                 <div className="p-3 rounded-2xl bg-secondary/70 border border-border flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -332,9 +300,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <button
                     onClick={() => {
-                      logoutUser();
                       setMobileMenuOpen(false);
-                      toast.success(lang === 'uz' ? 'Tizimdan chiqdingiz' : 'Signed out');
+                      handleSignOut();
                     }}
                     className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
                     title={lang === 'uz' ? 'Chiqish' : 'Sign Out'}

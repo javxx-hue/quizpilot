@@ -6,15 +6,14 @@ import { Testimonials } from '../components/landing/Testimonials';
 import { Pricing } from '../components/landing/Pricing';
 import { Faq } from '../components/landing/Faq';
 import { Language } from '../lib/i18n';
-import { StudySet, UserTier } from '../types';
+import { StudySet } from '../types';
 
 interface LandingPageProps {
   lang: Language;
   onNavigate: (route: string) => void;
   onSetGenerated: (set: StudySet) => void;
   onOpenCreateModal: () => void;
-  userTier: UserTier;
-  onOpenPaymentModal: (plan?: UserTier) => void;
+  onOpenBeta: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -22,8 +21,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onNavigate,
   onSetGenerated,
   onOpenCreateModal,
-  userTier,
-  onOpenPaymentModal,
+  onOpenBeta,
 }) => {
   return (
     <div className="flex flex-col min-h-screen">
@@ -33,12 +31,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <Testimonials lang={lang} />
       <Pricing
         lang={lang}
-        userTier={userTier}
         onSelectPlan={(plan) => {
           if (plan === 'free') {
             onOpenCreateModal();
           } else {
-            onOpenPaymentModal(plan as UserTier);
+            onOpenBeta();
           }
         }}
       />

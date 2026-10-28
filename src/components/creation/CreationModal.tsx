@@ -5,7 +5,7 @@ import { FileText, Upload, Youtube, Lightbulb, Sparkles, CheckCircle2, HelpCircl
 import { Language, getTranslations } from '../../lib/i18n';
 import { StudySet, StudySetType, Difficulty } from '../../types';
 import { extractTextFromPdf } from '../../lib/pdfParser';
-import { generateStudySet } from '../../lib/ai';
+import { generateStudySet, describeGenerationError } from '../../lib/ai';
 import { saveStudySet } from '../../lib/storage';
 import { getYouTubeInfo, fetchYouTubeTitle, YouTubeVideoInfo } from '../../lib/youtubeParser';
 import { toast } from '../ui/Toast';
@@ -74,9 +74,9 @@ export const CreationModal: React.FC<CreationModalProps> = ({
       rawContent = await extractTextFromPdf(pdfFile);
       if (!inferredTitle) inferredTitle = pdfFile.name.replace(/\.[^/.]+$/, '');
     } else if (sourceType === 'youtube') {
-      if (!videoUrl.trim()) return;
-      rawContent = `YouTube Video Material (${videoUrl}): Title: ${ytTitle || 'Educational Video'}. Comprehensive lecture content, key topic breakdown, and core principles.`;
-      if (!inferredTitle) inferredTitle = ytTitle || 'YouTube Video Session';
+      // No transcript support yet: the title alone is not study material.
+      toast.error(lang === 'uz' ? 'YouTube videodan yaratish tez orada qo\'shiladi. Hozircha matn yoki PDF yuklang.' : 'YouTube support is coming soon. Use text or PDF for now.');
+      return;
     } else if (sourceType === 'topic') {
       if (!topicPrompt.trim()) return;
       rawContent = `Topic and study domain: ${topicPrompt}. Detailed concepts, facts, and explanations.`;
@@ -101,7 +101,7 @@ export const CreationModal: React.FC<CreationModalProps> = ({
       onClose();
     } catch (e) {
       console.error('Failed to create study set', e);
-      toast.error(lang === 'uz' ? 'To\'plam yaratishda xatolik yuz berdi' : 'Failed to create study set');
+      toast.error(describeGenerationError(e, lang));
     } finally {
       setIsGenerating(false);
     }
@@ -340,8 +340,8 @@ export const CreationModal: React.FC<CreationModalProps> = ({
               <option value={5}>5 {lang === 'uz' ? 'ta' : 'items'}</option>
               <option value={10}>10 {lang === 'uz' ? 'ta' : 'items'}</option>
               <option value={15}>15 {lang === 'uz' ? 'ta' : 'items'}</option>
-              <option value={20}>20 {lang === 'uz' ? 'ta (PRO)' : 'items (PRO)'}</option>
-              <option value={30}>30 {lang === 'uz' ? 'ta (PRO / Exam)' : 'items (PRO / Exam)'}</option>
+              <option value={20}>20 {lang === 'uz' ? 'ta' : 'items'}</option>
+              <option value={30}>30 {lang === 'uz' ? 'ta' : 'items'}</option>
             </select>
           </div>
 

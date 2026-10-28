@@ -61,43 +61,11 @@ export interface GenerationOptions {
   topic?: string;
 }
 
-export type UserTier = 'free' | 'pro' | 'institution';
-
-export interface SubscriptionInfo {
-  tier: UserTier;
-  planName: string;
-  amount: number;
-  currency: string;
-  interval: 'monthly' | 'yearly';
-  startDate: string;
-  renewsAt: string;
-  paymentMethod: 'card' | 'payme' | 'click' | 'voucher' | 'stripe';
-  last4?: string;
-  status: 'active' | 'cancelled';
-  transactionId?: string;
-}
-
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
   avatar?: string;
-  provider: 'google' | 'email' | 'guest';
+  provider: 'google' | 'email';
   createdAt: string;
-}
-
-export interface FeedbackItem {
-  id: string;
-  name: string;
-  role: string;
-  text: string;
-  rating: number;
-  date: string;
-}
-
-export interface PaymentGatewayConfig {
-  stripeProLink: string;
-  stripeInstitutionLink: string;
-  paymeMerchantUrl: string;
-  clickMerchantUrl: string;
 }

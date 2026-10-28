@@ -31,30 +31,44 @@ AI asosida ishlaydigan zamonaviy o'quv platformasi — [quizpilot.io](https://qu
    - QuizPilot'ning vintage qog'oz foni (`#FAF7EE`), `DM Serif Text` sarlavhalari va toza `Inter` tipografiyasi.
    - Qorong'i rejim (Dark Mode) va yorug' rejim (Light Mode).
 
-7. **AI & Avtonom Ishlash**:
-   - Google Gemini API integratsiyasi (Sozlamalar orqali shaxsiy kalit kiritish mumkin).
-   - **Smart Fallback rejimi**: API kalit kiritilmagan taqdirda ham ilova ichki aqlli generator orqali to'xtovsiz ishlayveradi.
+7. **AI**:
+   - Google Gemini API (beta davrida shaxsiy kalit header'dagi kalit belgisi orqali kiritiladi).
+   - Kalit bo'lmasa yoki AI xato qaytarsa, foydalanuvchiga aniq xabar ko'rsatiladi. Soxta "zaxira" generator yo'q.
+   - YouTube manbasi hozircha o'chirilgan (transkript qo'llab-quvvatlanmaguncha).
+
+8. **Hisoblar**: Supabase Auth (email + parol, Google). To'lovlar beta davrida yo'q, hammasi bepul.
+
+Joriy reja: [docs/superpowers/plans/2026-10-28-sessiya-mvp-reja.md](docs/superpowers/plans/2026-10-28-sessiya-mvp-reja.md)
 
 ---
 
 ## 🚀 Ishga tushirish (Getting Started)
 
-Loyiha katalogiga o'ting va dev serverni ishga tushiring:
-
 ```bash
-cd "C:\Users\Asus\.gemini\antigravity\scratch\quizpilot-clone"
+npm install
+cp .env.example .env   # Supabase URL va anon kalitini kiriting
 npm run dev
 ```
 
-Brauzeringizda quyidagi manzilni oching:
-`http://localhost:5173`
+Brauzerda: `http://localhost:5173`. `.env` to'ldirilmasa ham sayt ishlaydi, faqat hisob yaratish o'chiq bo'ladi.
+
+### Supabase sozlash (bir marta)
+
+1. [supabase.com](https://supabase.com) da yangi loyiha yarating.
+2. **SQL Editor** da [supabase/migrations/0001_init.sql](supabase/migrations/0001_init.sql) ni ishga tushiring.
+3. **Project Settings → API** dan `URL` va `anon public` kalitni `.env` ga yozing.
+4. **Authentication → URL Configuration**: Site URL `http://localhost:5173`, Redirect URLs ga `http://localhost:5173/**` qo'shing.
+5. Google bilan kirish uchun: **Authentication → Providers → Google** ni yoqing (Google Cloud'dan OAuth client ID/secret kerak).
+
+Deploy qilinganda hosting barcha yo'llarni `index.html` ga yo'naltirishi kerak (SPA rewrite), aks holda `/dashboard` kabi manzillar yangilanganda 404 beradi.
 
 ---
 
 ## 🛠 Texnologiyalar (Tech Stack)
 
-- **Frontend:** React 19 + TypeScript + Vite
+- **Frontend:** React 19 + TypeScript + Vite, React Router
 - **Styling:** Tailwind CSS + Lucide React Icons
-- **PDF Parser:** pdfjs-dist (brauzerda bevosita o'qiydi)
-- **AI:** Google Gemini API + Smart Heuristic Engine
-- **Saqlash:** Brauzer LocalStorage (barcha testlar va natijalar xavfsiz saqlanadi)
+- **PDF Parser:** pdfjs-dist (brauzerda, sahifa belgilari bilan)
+- **AI:** Google Gemini API (`VITE_GEMINI_MODEL`, standart `gemini-3.8-flash`)
+- **Backend:** Supabase (Auth, Postgres + RLS)
+- **Saqlash:** o'quv to'plamlari hozircha brauzer LocalStorage'da; 2-haftada Supabase'ga ko'chiriladi

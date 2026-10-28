@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Star, MessageSquarePlus, Sparkles, Send, CheckCircle2, UserCheck, HeartHandshake } from 'lucide-react';
+import { Star, MessageSquarePlus, Sparkles, Send, UserCheck, HeartHandshake } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
-import { getUserFeedbacks, addUserFeedback, getCurrentUser, subscribeStorage } from '../../lib/storage';
-import { FeedbackItem } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../lib/auth';
 import { toast } from '../ui/Toast';
 
 interface TestimonialsProps {
@@ -13,37 +13,45 @@ interface TestimonialsProps {
 
 export const Testimonials: React.FC<TestimonialsProps> = ({ lang }) => {
   const isUz = lang === 'uz';
-  const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>(getUserFeedbacks());
+  const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
+  const [isSending, setIsSending] = useState(false);
+
   // Feedback form state
-  const currentUser = getCurrentUser();
-  const [name, setName] = useState(currentUser?.name || '');
+  const [name, setName] = useState(user?.name || '');
   const [role, setRole] = useState('');
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
 
   useEffect(() => {
-    const unsub = subscribeStorage(() => {
-      setFeedbacks(getUserFeedbacks());
-      const u = getCurrentUser();
-      if (u && !name) setName(u.name);
-    });
-    return () => unsub();
-  }, []);
+    if (user && !name) setName(user.name);
+  }, [user]);
 
-  const handleSubmitFeedback = (e: React.FormEvent) => {
+  // Feedback goes privately to the team; it is not published on the site.
+  const handleSubmitFeedback = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !comment.trim()) return;
+    if (!supabase) {
+      toast.error(isUz ? 'Fikr yuborish hali sozlanmagan.' : 'Feedback is not configured yet.');
+      return;
+    }
 
-    addUserFeedback({
+    setIsSending(true);
+    const { error } = await supabase.from('feedback').insert({
+      user_id: user?.id ?? null,
       name: name.trim(),
-      role: role.trim() || (isUz ? 'O\'rganuvchi' : 'Learner'),
+      role: role.trim() || null,
       rating,
       text: comment.trim(),
     });
+    setIsSending(false);
 
-    toast.success(isUz ? 'Fikringiz uchun tashakkur! Saytda e\'lon qilindi.' : 'Thank you for your feedback! Posted.');
+    if (error) {
+      console.error('Feedback insert failed', error);
+      toast.error(isUz ? 'Yuborib bo\'lmadi, keyinroq urinib ko\'ring.' : 'Could not send, please try again later.');
+      return;
+    }
+    toast.success(isUz ? 'Fikringiz jamoaga yuborildi. Tashakkur!' : 'Your feedback was sent to the team. Thank you!');
     setComment('');
     setIsModalOpen(false);
   };
@@ -80,42 +88,8 @@ export const Testimonials: React.FC<TestimonialsProps> = ({ lang }) => {
           </div>
         </div>
 
-        {/* Real User Reviews Display OR Honest Early Adopter Cards */}
-        {feedbacks.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {feedbacks.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-3xl bg-card border border-border/80 p-6 sm:p-8 shadow-soft flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1 text-amber-500">
-                    {Array.from({ length: item.rating }).map((_, idx) => (
-                      <Star key={idx} size={15} className="fill-amber-500 text-amber-500" />
-                    ))}
-                  </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed italic">
-                    "{item.text}"
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between pt-5 mt-5 border-t border-border/60">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center">
-                      {item.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold text-foreground">{item.name}</h4>
-                      <p className="text-[11px] text-muted-foreground">{item.role}</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">{item.date}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Early adopter cards (submitted feedback is private, not shown here) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="rounded-3xl bg-card border border-border/80 p-6 sm:p-8 shadow-soft flex flex-col items-center text-center">
               <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center mb-4">
                 <UserCheck size={24} />
@@ -125,8 +99,8 @@ export const Testimonials: React.FC<TestimonialsProps> = ({ lang }) => {
               </h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 {isUz
-                  ? 'Saytda test yarating, flesh-kartalarni ko\'ring va taassurotlaringizni qoldiring. Sizning sharhingiz birinchilardan bo\'lib bu yerda ko\'rinadi.'
-                  : 'Generate a quiz, study with cards, and share your thoughts. Your feedback will be featured right here.'}
+                  ? 'Saytda test yarating, flesh-kartalarni ko\'ring va taassurotlaringizni jamoaga yuboring.'
+                  : 'Generate a quiz, study with cards, and send your thoughts to the team.'}
               </p>
             </div>
 
@@ -158,7 +132,6 @@ export const Testimonials: React.FC<TestimonialsProps> = ({ lang }) => {
               </p>
             </div>
           </div>
-        )}
 
       </div>
 
@@ -237,8 +210,8 @@ export const Testimonials: React.FC<TestimonialsProps> = ({ lang }) => {
             <Button variant="outline" size="sm" onClick={() => setIsModalOpen(false)}>
               {isUz ? 'Bekor qilish' : 'Cancel'}
             </Button>
-            <Button variant="primary" size="sm" icon={<Send size={14} />}>
-              {isUz ? 'Fikrni yuborish' : 'Submit Review'}
+            <Button variant="primary" size="sm" icon={<Send size={14} />} disabled={isSending}>
+              {isUz ? 'Fikrni yuborish' : 'Submit Feedback'}
             </Button>
           </div>
         </form>

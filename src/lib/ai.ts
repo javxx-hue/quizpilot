@@ -1,4 +1,4 @@
-import { StudySet, StudySetType, Difficulty, Language, QuizQuestion, Flashcard, StudyNote } from '../types';
+import { StudySet, StudySetType, Difficulty, Language, QuizQuestion, Flashcard } from '../types';
 import { getApiKey } from './storage';
 
 export interface GenerationParams {
@@ -11,184 +11,32 @@ export interface GenerationParams {
   language?: Language;
 }
 
-// -------------------------------------------------------------
-// Deterministic Smart Fallback Generator (No API Key Required)
-// -------------------------------------------------------------
-function generateSmartFallback(params: GenerationParams): StudySet {
-  const { rawContent, sourceType, targetType, title, count = 5, difficulty = 'medium', language = 'uz' } = params;
-  const isUz = language === 'uz';
-  
-  // Clean sentences & keywords
-  const cleanText = rawContent.replace(/\s+/g, ' ').trim();
-  const rawSentences = cleanText
-    .split(/(?<=[.?!])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 15);
-  
-  const safeTitle = title?.trim() || cleanText.slice(0, 40).trim() || (isUz ? 'Yangi O\'quv To\'plami' : 'New Study Set');
-  const now = Date.now();
+// Model can be overridden with VITE_GEMINI_MODEL when Google retires the default.
+const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || 'gemini-3.8-flash';
 
-  if (targetType === 'quiz' || targetType === 'exam') {
-    const questions: QuizQuestion[] = [];
-    const numQ = Math.max(3, Math.min(count, 15));
+export type GenerationErrorCode = 'NO_API_KEY' | 'API_ERROR' | 'BAD_RESPONSE' | 'EMPTY_SOURCE';
 
-    for (let i = 0; i < numQ; i++) {
-      const sentence = rawSentences[i % Math.max(1, rawSentences.length)] || 
-        (isUz 
-          ? `Mavzuga oid asosiy qoida va tushunchalar o'rganilishi muhim.` 
-          : `Fundamental concepts and definitions are crucial to master this subject.`);
-      
-      const words = sentence.split(' ').filter((w) => w.length > 4);
-      const focusWord = words[i % Math.max(1, words.length)]?.replace(/[,.:;?!]/g, '') || (isUz ? 'Tushuncha' : 'Concept');
-
-      const qText = isUz
-        ? `"${safeTitle}" mavzusida "${focusWord}" qanday asosiy vazifani bajaradi?`
-        : `Regarding "${safeTitle}", what is the primary role of "${focusWord}"?`;
-
-      const optA = isUz
-        ? `Tizimning asosiy strukturaviy va funksional yaxlitligini ta'minlaydi`
-        : `Maintains structural stability and core functional integrity`;
-      const optB = isUz
-        ? `Jarayonni tezlashtirish va sarflanadigan resurslarni optimallashtirish`
-        : `Accelerates reaction cycles and optimizes resource consumption`;
-      const optC = isUz
-        ? `Tashqi muhit ta'sirini neytrallash va barqarorlikni saqlash`
-        : `Neutralizes adverse external variations and preserves homeostasis`;
-      const optD = isUz
-        ? `Yordamchi ko'rsatkich sifatida faqat alohida holatlarda qo'llaniladi`
-        : `Serves purely as a secondary auxiliary metric under specific conditions`;
-
-      questions.push({
-        id: `q-${now}-${i}`,
-        question: qText,
-        options: [optA, optB, optC, optD],
-        correctAnswer: i % 4,
-        hint: isUz
-          ? `Ushbu komponent mavzuning poydevor tamoyillari bilan uzviy bog'liq.`
-          : `Focus on the foundational principle connecting this component to the core concept.`,
-        explanation: isUz
-          ? `Mavzu tahliliga ko'ra, to'g'ri javob tizimning asosiy mexanizmi va tamoyilini to'g'ri ifodalaydi: "${sentence.slice(0, 120)}..."`
-          : `Based on content analysis, the correct answer directly reflects the verified definition: "${sentence.slice(0, 120)}..."`,
-      });
-    }
-
-    return {
-      id: `set-${now}`,
-      title: safeTitle,
-      type: targetType,
-      description: isUz
-        ? `"${safeTitle}" mavzusi bo'yicha tuzilgan ${numQ} ta savolli interaktiv sinov.`
-        : `Interactive practice set of ${numQ} questions generated for "${safeTitle}".`,
-      createdAt: now,
-      itemCount: questions.length,
-      difficulty,
-      sourceType,
-      sourceSnippet: cleanText.slice(0, 200),
-      questions,
-    };
+export class GenerationError extends Error {
+  constructor(public code: GenerationErrorCode, message: string) {
+    super(message);
+    this.name = 'GenerationError';
   }
-
-  if (targetType === 'flashcards') {
-    const flashcards: Flashcard[] = [];
-    const numCards = Math.max(4, Math.min(count, 12));
-
-    for (let i = 0; i < numCards; i++) {
-      const sentence = rawSentences[i % Math.max(1, rawSentences.length)] || (isUz ? 'Mavzuning asosiy qoidasi' : 'Core principle of topic');
-      const parts = sentence.split(/[-—:–]/);
-      const front = parts[0]?.trim().slice(0, 60) || `${isUz ? 'Asosiy tushuncha' : 'Key Concept'} #${i + 1}`;
-      const back = (parts[1]?.trim() || sentence).slice(0, 200);
-
-      flashcards.push({
-        id: `fc-${now}-${i}`,
-        front: front.length > 5 ? front : `${safeTitle}: ${isUz ? 'Asosiy tushuncha' : 'Term'} ${i + 1}`,
-        back: back || (isUz ? 'Ushbu tushuncha mavzuning muhim qismini tashkil etadi.' : 'This term forms a foundational pillar in this subject.'),
-        example: isUz 
-          ? `Amaliy qo'llanilishi: O'rganilgan tamoyilni real misolda tahlil qilish.`
-          : `Real-world context: Demonstrates practical application within standard scenarios.`,
-      });
-    }
-
-    return {
-      id: `set-${now}`,
-      title: safeTitle,
-      type: 'flashcards',
-      description: isUz
-        ? `${flashcards.length} ta aktiv eslash flesh-kartalari to'plami.`
-        : `Spaced-repetition active recall deck with ${flashcards.length} cards.`,
-      createdAt: now,
-      itemCount: flashcards.length,
-      difficulty,
-      sourceType,
-      sourceSnippet: cleanText.slice(0, 200),
-      flashcards,
-    };
-  }
-
-  // targetType === 'notes'
-  const notes: StudyNote = {
-    id: `note-${now}`,
-    title: safeTitle,
-    summary: rawSentences.slice(0, 3).join(' ') || 
-      (isUz 
-        ? `"${safeTitle}" mavzusi bo'yicha tahlil qilingan ma'lumotlar tizimlashtirildi va o'rganish uchun qulay qismlarga ajratildi.`
-        : `Synthesized overview of "${safeTitle}", breaking down complex concepts into structured study segments.`),
-    keyPoints: rawSentences.slice(3, 7).map((s) => s.trim()).filter((s) => s.length > 10).length > 0
-      ? rawSentences.slice(3, 7).map((s) => s.trim())
-      : [
-          isUz ? 'Mavzuning markaziy poydevor tushunchalarini o\'zlashtirish.' : 'Core conceptual foundation and system overview.',
-          isUz ? 'Asosiy jarayonlar va ularning o\'zaro bog\'liqligi.' : 'Sequential stages and interdependencies.',
-          isUz ? 'Amaliy ahamiyati va qo\'llanilish doirasi.' : 'Practical utility and real-world implications.',
-          isUz ? 'Imtihon va testlarda eng ko\'p uchraydigan nuqtalar.' : 'Frequent exam highlights and focal definitions.',
-        ],
-    glossary: [
-      {
-        term: isUz ? 'Boshlang\'ich tamoyil' : 'Foundational Premise',
-        definition: isUz ? 'Mavzuni tushunish uchun zarur bo\'lgan eng asosiy qoida.' : 'The primary condition required to comprehend the subject.',
-      },
-      {
-        term: isUz ? 'Tizimli tahlil' : 'Systematic Analysis',
-        definition: isUz ? 'Materialni mantiqiy qismlarga bo\'lib chuqur o\'rganish usuli.' : 'Decomposing complex material into structured components.',
-      },
-      {
-        term: isUz ? 'Xulosa' : 'Synthesis',
-        definition: isUz ? 'Barcha faktlarni umumlashtiruvchi yakuniy natija.' : 'Aggregated conclusion integrating all evaluated facts.',
-      },
-    ],
-  };
-
-  return {
-    id: `set-${now}`,
-    title: safeTitle,
-    type: 'notes',
-    description: isUz
-      ? `"${safeTitle}" bo'yicha strukturaviy konspekt va lug'at.`
-      : `Structured study guide and key definition glossary for "${safeTitle}".`,
-    createdAt: now,
-    itemCount: 1,
-    difficulty,
-    sourceType,
-    sourceSnippet: cleanText.slice(0, 200),
-    notes,
-  };
 }
 
 // -------------------------------------------------------------
-// Real Google Gemini API Call (Direct REST endpoint)
+// Google Gemini API call (REST, key sent in header, not in the URL)
 // -------------------------------------------------------------
 async function callGeminiApi(prompt: string, apiKey: string): Promise<string> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
-      contents: [
-        {
-          parts: [{ text: prompt }],
-        },
-      ],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.4,
         responseMimeType: 'application/json',
@@ -198,37 +46,28 @@ async function callGeminiApi(prompt: string, apiKey: string): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API Error: ${response.status} - ${errorText}`);
+    throw new GenerationError('API_ERROR', `Gemini API ${response.status}: ${errorText.slice(0, 300)}`);
   }
 
   const data = await response.json();
   const textOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!textOutput) {
-    throw new Error('Gemini API returned an empty response.');
+    throw new GenerationError('BAD_RESPONSE', 'Gemini returned an empty response.');
   }
   return textOutput;
 }
 
-// -------------------------------------------------------------
-// Main AI Orchestration Function
-// -------------------------------------------------------------
-export async function generateStudySet(params: GenerationParams): Promise<StudySet> {
-  const apiKey = getApiKey();
-  const { rawContent, targetType, title, count = 5, difficulty = 'medium', language = 'uz', sourceType } = params;
-  
-  // If no API key provided, immediately and smoothly use the smart heuristic generator
-  if (!apiKey) {
-    // Add realistic 800ms generation delay for satisfying UX
-    await new Promise((res) => setTimeout(res, 900));
-    return generateSmartFallback(params);
-  }
+function buildPrompt(params: GenerationParams): string {
+  const { rawContent, sourceType, targetType, title, count = 5, difficulty = 'medium', language = 'uz' } = params;
+  const grounding =
+    sourceType === 'topic'
+      ? 'The source below is only a topic name. Use well-established textbook knowledge and avoid uncertain claims.'
+      : 'Use ONLY the source material below. Do not invent facts that are not supported by it. When the source has [Sahifa N] markers, mention the page in explanations.';
+  return `
+You are an educational assistant helping university students prepare for exams.
+${grounding}
 
-  try {
-    const prompt = `
-You are QuizPilot AI, a world-class educational AI assistant.
-Analyze the following source material and generate a study set.
-
-Language: ${language === 'uz' ? 'Uzbek (O\'zbek tili)' : 'English'}
+Language: ${language === 'uz' ? "Uzbek (O'zbek tili, lotin yozuvi)" : 'English'}
 Target Type: ${targetType}
 Difficulty: ${difficulty}
 Count: ${count}
@@ -236,7 +75,7 @@ Title: ${title || 'Infer an appropriate concise title'}
 
 Source Material:
 """
-${rawContent.slice(0, 10000)}
+${rawContent.slice(0, 20000)}
 """
 
 Output MUST be strict valid JSON matching one of these formats:
@@ -249,23 +88,20 @@ If targetType is "quiz" or "exam":
     {
       "question": "Question text?",
       "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": 0, // 0-based integer
+      "correctAnswer": 0,
       "hint": "Helpful hint without revealing the answer",
-      "explanation": "Detailed explanation of why this answer is correct"
+      "explanation": "Why this answer is correct, citing the source"
     }
   ]
 }
+"correctAnswer" is the 0-based index of the correct option. Vary its position across questions.
 
 If targetType is "flashcards":
 {
   "title": "Deck title",
   "description": "Short description",
   "flashcards": [
-    {
-      "front": "Term / Question",
-      "back": "Clear definition / Answer",
-      "example": "Real-world context or example"
-    }
+    { "front": "Term / Question", "back": "Clear definition / Answer", "example": "Example from the source" }
   ]
 }
 
@@ -274,52 +110,127 @@ If targetType is "notes":
   "title": "Document title",
   "summary": "Executive summary paragraph",
   "keyPoints": ["Bullet point 1", "Bullet point 2", "Bullet point 3"],
-  "glossary": [
-    { "term": "Key term", "definition": "Clear concise definition" }
-  ]
+  "glossary": [{ "term": "Key term", "definition": "Clear concise definition" }]
 }
 `;
+}
 
-    const rawJson = await callGeminiApi(prompt, apiKey);
-    const parsed = JSON.parse(rawJson);
-    const now = Date.now();
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
-    const result: StudySet = {
-      id: `set-${now}`,
-      title: parsed.title || title || 'AI Generated Set',
-      type: targetType,
-      description: parsed.description || `Generated with Gemini AI (${difficulty})`,
-      createdAt: now,
-      itemCount: parsed.questions?.length || parsed.flashcards?.length || 1,
-      difficulty,
-      sourceType,
-      sourceSnippet: rawContent.slice(0, 200),
-      questions: parsed.questions?.map((q: any, i: number) => ({
-        id: `q-${now}-${i}`,
-        question: q.question,
-        options: q.options || [],
-        correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
-        hint: q.hint || '',
-        explanation: q.explanation || '',
-      })),
-      flashcards: parsed.flashcards?.map((fc: any, i: number) => ({
-        id: `fc-${now}-${i}`,
-        front: fc.front,
-        back: fc.back,
-        example: fc.example,
-      })),
-      notes: parsed.summary ? {
-        id: `note-${now}`,
-        title: parsed.title || title || 'Study Notes',
-        summary: parsed.summary,
-        keyPoints: parsed.keyPoints || [],
-        glossary: parsed.glossary || [],
-      } : undefined,
-    };
+function parseQuestions(raw: unknown, now: number): QuizQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (q: any) =>
+        isNonEmptyString(q?.question) &&
+        Array.isArray(q?.options) &&
+        q.options.length >= 2 &&
+        q.options.every(isNonEmptyString) &&
+        Number.isInteger(q?.correctAnswer) &&
+        q.correctAnswer >= 0 &&
+        q.correctAnswer < q.options.length
+    )
+    .map((q: any, i: number) => ({
+      id: `q-${now}-${i}`,
+      question: q.question,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      hint: isNonEmptyString(q.hint) ? q.hint : '',
+      explanation: isNonEmptyString(q.explanation) ? q.explanation : '',
+    }));
+}
 
-    return result;
-  } catch (error) {
-    console.warn('Gemini AI API call failed, gracefully using Smart Fallback generator:', error);
-    return generateSmartFallback(params);
+function parseFlashcards(raw: unknown, now: number): Flashcard[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((fc: any) => isNonEmptyString(fc?.front) && isNonEmptyString(fc?.back))
+    .map((fc: any, i: number) => ({
+      id: `fc-${now}-${i}`,
+      front: fc.front,
+      back: fc.back,
+      example: isNonEmptyString(fc.example) ? fc.example : undefined,
+    }));
+}
+
+// -------------------------------------------------------------
+// Main entry point. Throws GenerationError instead of faking results.
+// -------------------------------------------------------------
+export async function generateStudySet(params: GenerationParams): Promise<StudySet> {
+  const { rawContent, targetType, title, difficulty = 'medium', sourceType } = params;
+
+  if (!rawContent.trim()) {
+    throw new GenerationError('EMPTY_SOURCE', 'Source material is empty.');
+  }
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new GenerationError('NO_API_KEY', 'Gemini API key is not set.');
+  }
+
+  const rawJson = await callGeminiApi(buildPrompt(params), apiKey);
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new GenerationError('BAD_RESPONSE', 'Gemini response is not valid JSON.');
+  }
+
+  const now = Date.now();
+  const base = {
+    id: `set-${now}`,
+    title: isNonEmptyString(parsed.title) ? parsed.title : title || 'AI Generated Set',
+    type: targetType,
+    description: isNonEmptyString(parsed.description) ? parsed.description : '',
+    createdAt: now,
+    difficulty,
+    sourceType,
+    sourceSnippet: rawContent.slice(0, 200),
+  };
+
+  if (targetType === 'quiz' || targetType === 'exam') {
+    const questions = parseQuestions(parsed.questions, now);
+    if (questions.length === 0) throw new GenerationError('BAD_RESPONSE', 'No valid questions in response.');
+    return { ...base, itemCount: questions.length, questions };
+  }
+
+  if (targetType === 'flashcards') {
+    const flashcards = parseFlashcards(parsed.flashcards, now);
+    if (flashcards.length === 0) throw new GenerationError('BAD_RESPONSE', 'No valid flashcards in response.');
+    return { ...base, itemCount: flashcards.length, flashcards };
+  }
+
+  if (!isNonEmptyString(parsed.summary)) {
+    throw new GenerationError('BAD_RESPONSE', 'Notes summary missing in response.');
+  }
+  return {
+    ...base,
+    itemCount: 1,
+    notes: {
+      id: `note-${now}`,
+      title: base.title,
+      summary: parsed.summary,
+      keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints.filter(isNonEmptyString) : [],
+      glossary: Array.isArray(parsed.glossary)
+        ? parsed.glossary.filter((g: any) => isNonEmptyString(g?.term) && isNonEmptyString(g?.definition))
+        : [],
+    },
+  };
+}
+
+export function describeGenerationError(error: unknown, lang: Language): string {
+  const isUz = lang === 'uz';
+  const code = error instanceof GenerationError ? error.code : 'API_ERROR';
+  switch (code) {
+    case 'NO_API_KEY':
+      return isUz
+        ? 'Gemini API kaliti kiritilmagan. Yuqoridagi kalit belgisini bosib, kalitni kiriting.'
+        : 'Gemini API key is missing. Click the key icon in the header to add it.';
+    case 'EMPTY_SOURCE':
+      return isUz ? 'Manbadan matn olinmadi. Boshqa fayl yoki matn bilan urinib ko\'ring.' : 'No text could be extracted from the source.';
+    case 'BAD_RESPONSE':
+      return isUz ? 'AI javobi noto\'g\'ri formatda keldi. Qayta urinib ko\'ring.' : 'The AI returned an invalid response. Please try again.';
+    default:
+      return isUz ? 'AI xizmatiga ulanib bo\'lmadi. Kalit va internetni tekshiring.' : 'Could not reach the AI service. Check your key and connection.';
   }
 }

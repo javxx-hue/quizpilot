@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { CreationModal } from './components/creation/CreationModal';
 import { AuthModal } from './components/layout/AuthModal';
 import { OnboardingModal } from './components/layout/OnboardingModal';
 import { LegalModals } from './components/layout/LegalModals';
-import { PaymentModal } from './components/layout/PaymentModal';
+import { BetaModal } from './components/layout/BetaModal';
 import { ToastContainer } from './components/ui/Toast';
+import { Button } from './components/ui/Button';
 
 import { LandingPage } from './pages/LandingPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -24,8 +26,6 @@ import {
   initStorage,
   getStudySets,
   getUserStats,
-  getUserTier,
-  setUserTier,
   deleteStudySet,
   getSavedLanguage,
   setSavedLanguage,
@@ -33,9 +33,52 @@ import {
   setSavedTheme,
   subscribeStorage,
 } from './lib/storage';
-import { toast } from './components/ui/Toast';
 import { Language } from './lib/i18n';
-import { StudySet, StudySetType, UserStats, UserTier } from './types';
+import { StudySet, StudySetType, UserStats } from './types';
+
+type SourceType = 'text' | 'pdf' | 'youtube' | 'topic';
+
+// Renders the runner for /study/:id. The set comes from the list, so a page
+// refresh or a shared link to the same browser still opens it.
+const StudyRoute: React.FC<{ studySets: StudySet[]; lang: Language }> = ({ studySets, lang }) => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [attempt, setAttempt] = useState(0);
+  const set = studySets.find((s) => s.id === id);
+  const isUz = lang === 'uz';
+
+  if (!set) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-24 text-center space-y-4">
+        <h2 className="text-2xl font-serif font-bold text-foreground">
+          {isUz ? 'To\'plam topilmadi' : 'Study set not found'}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {isUz ? 'U o\'chirilgan yoki boshqa qurilmada yaratilgan bo\'lishi mumkin.' : 'It may have been deleted or created on another device.'}
+        </p>
+        <Button variant="primary" size="md" onClick={() => navigate('/dashboard')}>
+          {isUz ? 'Kabinetga qaytish' : 'Back to dashboard'}
+        </Button>
+      </div>
+    );
+  }
+
+  const finish = () => navigate('/dashboard');
+  const retake = () => setAttempt((n) => n + 1);
+
+  switch (set.type) {
+    case 'quiz':
+      return <QuizRunner key={attempt} set={set} lang={lang} onFinish={finish} onRetake={retake} />;
+    case 'flashcards':
+      return <FlashcardPlayer key={attempt} set={set} lang={lang} onFinish={finish} />;
+    case 'notes':
+      return <NotesViewer set={set} lang={lang} onBack={finish} />;
+    case 'exam':
+      return <ExamSimulator key={attempt} set={set} lang={lang} onFinish={finish} onRetake={retake} />;
+    default:
+      return <Navigate to="/dashboard" replace />;
+  }
+};
 
 export default function App() {
   // Initialize storage on first load
@@ -43,118 +86,71 @@ export default function App() {
     initStorage();
   }, []);
 
-  const [currentRoute, setCurrentRoute] = useState<string>('/');
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [lang, setLang] = useState<Language>(getSavedLanguage());
   const [theme, setTheme] = useState<'light' | 'dark'>(getSavedTheme());
   const [studySets, setStudySets] = useState<StudySet[]>(getStudySets());
   const [stats, setStats] = useState<UserStats>(getUserStats());
-  const [userTier, setUserTierState] = useState<UserTier>(getUserTier());
-  
+
   // Modals state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createModalInitialType, setCreateModalInitialType] = useState<StudySetType>('quiz');
-  const [createModalInitialSource, setCreateModalInitialSource] = useState<'text' | 'pdf' | 'youtube' | 'topic'>('text');
-  
+  const [createModalInitialSource, setCreateModalInitialSource] = useState<SourceType>('text');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [legalModalType, setLegalModalType] = useState<'terms' | 'privacy' | 'contact' | null>(null);
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentModalPlan, setPaymentModalPlan] = useState<UserTier>('pro');
-
-  const [activeStudySet, setActiveStudySet] = useState<StudySet | null>(null);
+  const [isBetaModalOpen, setIsBetaModalOpen] = useState(false);
 
   // Sync with storage updates
   useEffect(() => {
     const unsubscribe = subscribeStorage(() => {
       setStudySets(getStudySets());
       setStats(getUserStats());
-      setUserTierState(getUserTier());
     });
     return () => unsubscribe();
   }, []);
 
-  // Check for returning payment redirect (e.g. from Stripe or Payme)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('payment_success') === 'true') {
-      const plan = (params.get('tier') as UserTier) || 'pro';
-      const method = (params.get('method') as any) || 'stripe';
-      const amount = params.get('amount') ? Number(params.get('amount')) : 7;
-      const now = new Date();
-      const nextMonth = new Date(now);
-      nextMonth.setMonth(nextMonth.getMonth() + 1);
-
-      const verifiedSub = {
-        tier: plan,
-        planName: plan === 'institution' ? 'Institution Pro' : 'Pro Scholar',
-        amount: amount,
-        currency: method === 'payme' ? 'UZS' : 'USD',
-        interval: 'monthly' as const,
-        startDate: now.toISOString().split('T')[0],
-        renewsAt: nextMonth.toISOString().split('T')[0],
-        paymentMethod: method,
-        status: 'active' as const,
-        transactionId: `TX-${Date.now().toString(36).toUpperCase()}`,
-      };
-
-      setUserTier(plan, verifiedSub);
-      setUserTierState(plan);
-      toast.success(lang === 'uz' ? 'Haqiqiy to\'lov tasdiqlandi! PRO tarifingiz faollashdi! 🎉' : 'Payment confirmed! PRO activated! 🎉');
-
-      // Clean URL params
-      const cleanUrl = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-    }
-  }, [lang]);
-
   // Sync theme class on body
   useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  // Handle route change
-  const handleNavigate = (route: string) => {
-    setActiveStudySet(null);
-    
-    // Sub-route handling
-    if (route === '/pricing') {
-      if (currentRoute !== '/') {
-        setCurrentRoute('/');
-        setTimeout(() => {
-          document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
-      } else {
-        document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
-      }
-      return;
+  // Scroll to top on page change, or to the #section in the URL
+  useEffect(() => {
+    if (location.hash) {
+      setTimeout(() => document.querySelector(location.hash)?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } else {
+      window.scrollTo({ top: 0 });
     }
+  }, [location.pathname, location.hash]);
 
-    if (route === '/quizzes-ai/pdf') {
-      setCurrentRoute('/quizzes-ai');
+  const handleOpenCreateModal = (type: StudySetType = 'quiz', source: SourceType = 'text') => {
+    setCreateModalInitialType(type);
+    setCreateModalInitialSource(source);
+    setIsCreateModalOpen(true);
+  };
+
+  // Components still call onNavigate(route); some routes open modals instead of pages.
+  const handleNavigate = (route: string) => {
+    if (route === '/pricing') {
+      navigate('/#pricing');
+    } else if (route === '/quizzes-ai/pdf') {
+      navigate('/quizzes-ai');
       handleOpenCreateModal('quiz', 'pdf');
     } else if (route === '/quizzes-ai/video') {
-      setCurrentRoute('/quizzes-ai');
+      navigate('/quizzes-ai');
       handleOpenCreateModal('quiz', 'youtube');
     } else if (route === '/auth') {
       setIsAuthModalOpen(true);
     } else if (route === '/onboarding') {
       setIsOnboardingOpen(true);
     } else if (route === '/terms' || route === '/privacy' || route === '/contact') {
-      setLegalModalType(route.substring(1) as any);
+      setLegalModalType(route.substring(1) as 'terms' | 'privacy' | 'contact');
     } else {
-      setCurrentRoute(route);
+      navigate(route);
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleOpenPaymentModal = (plan: UserTier = 'pro') => {
-    setPaymentModalPlan(plan);
-    setIsPaymentModalOpen(true);
   };
 
   const handleLanguageChange = (newLang: Language) => {
@@ -168,98 +164,19 @@ export default function App() {
     setSavedTheme(nextTheme);
   };
 
-  const handleOpenCreateModal = (type: StudySetType = 'quiz', source: 'text' | 'pdf' | 'youtube' | 'topic' = 'text') => {
-    setCreateModalInitialType(type);
-    setCreateModalInitialSource(source);
-    setIsCreateModalOpen(true);
-  };
-
-  const handleSetGenerated = (newSet: StudySet) => {
-    setActiveStudySet(newSet);
-  };
+  const openSet = (set: StudySet) => navigate(`/study/${set.id}`);
 
   const handleDeleteSet = (id: string) => {
     deleteStudySet(id);
-    if (activeStudySet?.id === id) {
-      setActiveStudySet(null);
-    }
+    if (location.pathname === `/study/${id}`) navigate('/dashboard');
   };
 
-  // Render direct study runner if active
-  const renderActiveStudySet = () => {
-    if (!activeStudySet) return null;
-
-    if (activeStudySet.type === 'quiz') {
-      return (
-        <QuizRunner
-          set={activeStudySet}
-          lang={lang}
-          onFinish={() => {
-            setActiveStudySet(null);
-            handleNavigate('/dashboard');
-          }}
-          onRetake={() => {
-            const current = activeStudySet;
-            setActiveStudySet(null);
-            setTimeout(() => setActiveStudySet(current), 50);
-          }}
-        />
-      );
-    }
-
-    if (activeStudySet.type === 'flashcards') {
-      return (
-        <FlashcardPlayer
-          set={activeStudySet}
-          lang={lang}
-          onFinish={() => {
-            setActiveStudySet(null);
-            handleNavigate('/dashboard');
-          }}
-        />
-      );
-    }
-
-    if (activeStudySet.type === 'notes') {
-      return (
-        <NotesViewer
-          set={activeStudySet}
-          lang={lang}
-          onBack={() => {
-            setActiveStudySet(null);
-            handleNavigate('/dashboard');
-          }}
-        />
-      );
-    }
-
-    if (activeStudySet.type === 'exam') {
-      return (
-        <ExamSimulator
-          set={activeStudySet}
-          lang={lang}
-          onFinish={() => {
-            setActiveStudySet(null);
-            handleNavigate('/dashboard');
-          }}
-          onRetake={() => {
-            const current = activeStudySet;
-            setActiveStudySet(null);
-            setTimeout(() => setActiveStudySet(current), 50);
-          }}
-        />
-      );
-    }
-
-    return null;
-  };
+  const openBeta = () => setIsBetaModalOpen(true);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black">
-      
-      {/* Navbar */}
       <Navbar
-        currentRoute={currentRoute}
+        currentRoute={location.pathname}
         onNavigate={handleNavigate}
         lang={lang}
         onLanguageChange={handleLanguageChange}
@@ -268,41 +185,40 @@ export default function App() {
         onOpenCreateModal={() => handleOpenCreateModal('quiz')}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenOnboarding={() => setIsOnboardingOpen(true)}
-        userTier={userTier}
-        onOpenPaymentModal={handleOpenPaymentModal}
+        onOpenBeta={openBeta}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1">
-        {activeStudySet ? (
-          renderActiveStudySet()
-        ) : (
-          <>
-            {currentRoute === '/' && (
+        <Routes>
+          <Route
+            path="/"
+            element={
               <LandingPage
                 lang={lang}
                 onNavigate={handleNavigate}
-                onSetGenerated={handleSetGenerated}
+                onSetGenerated={openSet}
                 onOpenCreateModal={() => handleOpenCreateModal('quiz')}
-                userTier={userTier}
-                onOpenPaymentModal={handleOpenPaymentModal}
+                onOpenBeta={openBeta}
               />
-            )}
-
-            {currentRoute === '/dashboard' && (
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
               <DashboardPage
                 studySets={studySets}
                 stats={stats}
                 lang={lang}
-                userTier={userTier}
-                onOpenSet={(set) => setActiveStudySet(set)}
+                onOpenSet={openSet}
                 onDeleteSet={handleDeleteSet}
                 onOpenCreateModal={handleOpenCreateModal}
-                onOpenPaymentModal={handleOpenPaymentModal}
+                onOpenBeta={openBeta}
               />
-            )}
-
-            {currentRoute === '/quizzes-ai' && (
+            }
+          />
+          <Route
+            path="/quizzes-ai"
+            element={
               <QuizzesPage
                 studySets={studySets}
                 lang={lang}
@@ -310,9 +226,11 @@ export default function App() {
                 onDeleteSet={handleDeleteSet}
                 onNavigate={handleNavigate}
               />
-            )}
-
-            {currentRoute === '/flashcards-ai' && (
+            }
+          />
+          <Route
+            path="/flashcards-ai"
+            element={
               <FlashcardsPage
                 studySets={studySets}
                 lang={lang}
@@ -320,9 +238,11 @@ export default function App() {
                 onDeleteSet={handleDeleteSet}
                 onNavigate={handleNavigate}
               />
-            )}
-
-            {currentRoute === '/ai-notes' && (
+            }
+          />
+          <Route
+            path="/ai-notes"
+            element={
               <NotesPage
                 studySets={studySets}
                 lang={lang}
@@ -330,9 +250,11 @@ export default function App() {
                 onDeleteSet={handleDeleteSet}
                 onNavigate={handleNavigate}
               />
-            )}
-
-            {currentRoute === '/exam-simulator' && (
+            }
+          />
+          <Route
+            path="/exam-simulator"
+            element={
               <ExamPage
                 studySets={studySets}
                 lang={lang}
@@ -340,29 +262,24 @@ export default function App() {
                 onDeleteSet={handleDeleteSet}
                 onNavigate={handleNavigate}
               />
-            )}
-          </>
-        )}
+            }
+          />
+          <Route path="/study/:id" element={<StudyRoute studySets={studySets} lang={lang} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
 
-      {/* Global Creation Modal */}
       <CreationModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         lang={lang}
         initialType={createModalInitialType}
         initialSourceType={createModalInitialSource}
-        onSetCreated={handleSetGenerated}
+        onSetCreated={openSet}
       />
 
-      {/* Auth Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        lang={lang}
-      />
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} lang={lang} />
 
-      {/* Onboarding Tour Modal */}
       <OnboardingModal
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
@@ -370,31 +287,13 @@ export default function App() {
         onStartCreating={() => handleOpenCreateModal('quiz')}
       />
 
-      {/* Legal & Contact Modals */}
-      <LegalModals
-        type={legalModalType}
-        onClose={() => setLegalModalType(null)}
-        lang={lang}
-      />
+      <LegalModals type={legalModalType} onClose={() => setLegalModalType(null)} lang={lang} />
 
-      {/* Payment / Upgrade Modal */}
-      <PaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        lang={lang}
-        initialPlan={paymentModalPlan}
-      />
+      <BetaModal isOpen={isBetaModalOpen} onClose={() => setIsBetaModalOpen(false)} lang={lang} />
 
-      {/* Toast Notification Container */}
       <ToastContainer />
 
-      {/* Footer */}
-      <Footer
-        lang={lang}
-        onNavigate={handleNavigate}
-        onOpenLegalModal={(type) => setLegalModalType(type)}
-      />
-
+      <Footer lang={lang} onNavigate={handleNavigate} onOpenLegalModal={(type) => setLegalModalType(type)} />
     </div>
   );
 }

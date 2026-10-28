@@ -2,15 +2,14 @@ import React, { useState } from 'react';
 import { Check, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Language, getTranslations } from '../../lib/i18n';
 import { Button } from '../ui/Button';
-import { UserTier } from '../../types';
+type Plan = 'free' | 'pro' | 'institution';
 
 interface PricingProps {
   lang: Language;
-  userTier?: UserTier;
-  onSelectPlan: (plan: UserTier) => void;
+  onSelectPlan: (plan: Plan) => void;
 }
 
-export const Pricing: React.FC<PricingProps> = ({ lang, userTier = 'free', onSelectPlan }) => {
+export const Pricing: React.FC<PricingProps> = ({ lang, onSelectPlan }) => {
   const t = getTranslations(lang).pricing;
   const isUz = lang === 'uz';
   const [isYearly, setIsYearly] = useState(false);
@@ -26,6 +25,9 @@ export const Pricing: React.FC<PricingProps> = ({ lang, userTier = 'free', onSel
         </h2>
         <p className="text-sm text-muted-foreground">
           {t.subtitle}
+        </p>
+        <p className="mt-3 inline-block px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+          {isUz ? 'Beta davrida barcha imkoniyatlar bepul. Narxlar taxminiy.' : 'Everything is free during the beta. Prices are tentative.'}
         </p>
 
         {/* Monthly / Yearly Toggle */}
@@ -78,11 +80,10 @@ export const Pricing: React.FC<PricingProps> = ({ lang, userTier = 'free', onSel
             <Button
               variant="outline"
               size="md"
-              disabled={userTier === 'free'}
               onClick={() => onSelectPlan('free')}
               className="w-full"
             >
-              {userTier === 'free' ? (isUz ? 'Amaldagi Tarif ✓' : 'Current Plan ✓') : t.btnFree}
+              {t.btnFree}
             </Button>
           </div>
         </div>
@@ -120,7 +121,7 @@ export const Pricing: React.FC<PricingProps> = ({ lang, userTier = 'free', onSel
               onClick={() => onSelectPlan('pro')}
               className="w-full shadow-md"
             >
-              {userTier === 'pro' ? (isUz ? 'Amaldagi Tarif (PRO) ✓' : 'Current Plan (PRO) ✓') : t.btnPro}
+              {t.btnPro}
             </Button>
           </div>
         </div>
@@ -164,7 +165,7 @@ export const Pricing: React.FC<PricingProps> = ({ lang, userTier = 'free', onSel
               onClick={() => onSelectPlan('institution')}
               className="w-full"
             >
-              {userTier === 'institution' ? (isUz ? 'Amaldagi Tarif ✓' : 'Current Plan ✓') : t.btnInstitution}
+              {t.btnInstitution}
             </Button>
           </div>
         </div>

@@ -3,38 +3,35 @@ import { StudyStats } from '../components/dashboard/StudyStats';
 import { SetCard } from '../components/dashboard/SetCard';
 import { Button } from '../components/ui/Button';
 import { Plus, Search, Sparkles, HelpCircle, Layers, FileText, Timer, Download, Upload, RotateCcw, Crown, Check, BookOpen } from 'lucide-react';
-import { StudySet, StudySetType, UserStats, UserTier } from '../types';
+import { StudySet, StudySetType, UserStats } from '../types';
 import { Language, getTranslations } from '../lib/i18n';
-import { exportSetsToJson, importSetsFromJson, loadDemoSampleSets, resetToFreshState, getSubscriptionInfo } from '../lib/storage';
+import { exportSetsToJson, importSetsFromJson, loadDemoSampleSets, resetToFreshState } from '../lib/storage';
 import { toast } from '../components/ui/Toast';
 
 interface DashboardPageProps {
   studySets: StudySet[];
   stats: UserStats;
   lang: Language;
-  userTier?: UserTier;
   onOpenSet: (set: StudySet) => void;
   onDeleteSet: (id: string) => void;
   onOpenCreateModal: (type?: StudySetType) => void;
-  onOpenPaymentModal: (plan?: UserTier) => void;
+  onOpenBeta: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   studySets,
   stats,
   lang,
-  userTier = 'free',
   onOpenSet,
   onDeleteSet,
   onOpenCreateModal,
-  onOpenPaymentModal,
+  onOpenBeta,
 }) => {
   const t = getTranslations(lang).dashboard;
   const isUz = lang === 'uz';
   const [activeTab, setActiveTab] = useState<StudySetType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const importFileRef = useRef<HTMLInputElement>(null);
-  const subInfo = getSubscriptionInfo();
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -85,12 +82,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <h1 className="text-3xl sm:text-4xl font-serif font-bold text-foreground">
               {t.title}
             </h1>
-            {userTier !== 'free' && (
-              <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-800 dark:text-amber-300 text-xs font-bold flex items-center gap-1">
-                <Crown size={12} className="text-amber-500" />
-                PRO
-              </span>
-            )}
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {t.subtitle}
@@ -149,58 +140,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
-      {/* Pro Subscription Banner or Upgrade Banner */}
-      {userTier !== 'free' ? (
-        <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Crown size={20} />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <span>{subInfo?.planName || 'QuizPilot PRO'} Faol</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold">Faol</span>
-              </h4>
-              <p className="text-xs text-muted-foreground">
-                Cheksiz AI savollar, 100MB PDF hajmi va to'liq diagnostik imtihon rejimi faol. Keyingi to'lov: {subInfo?.renewsAt || '2027'}
-              </p>
-            </div>
+      {/* Beta banner (payments are not live yet) */}
+      <div className="mb-6 p-4 rounded-2xl bg-secondary/60 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 shadow-xs">
+            <Sparkles size={18} className="text-amber-400" />
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenPaymentModal(userTier)}
-            className="text-xs shrink-0"
-          >
-            Obunani boshqarish
-          </Button>
-        </div>
-      ) : (
-        <div className="mb-6 p-4 rounded-2xl bg-secondary/60 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 shadow-xs">
-              <Sparkles size={18} className="text-amber-400" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-foreground">
-                {isUz ? 'PRO Imkoniyatlarni oching' : 'Upgrade to QuizPilot PRO'}
-              </h4>
-              <p className="text-xs text-muted-foreground">
-                {isUz ? 'Cheksiz AI testlar, katta PDF hujjatlar va taymerli imtihon simulyatori' : 'Unlimited AI kits, large PDFs, and full exam diagnostics'}
-              </p>
-            </div>
+          <div>
+            <h4 className="text-sm font-bold text-foreground">
+              {isUz ? 'Beta davrida hammasi bepul' : 'Everything is free during the beta'}
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              {isUz ? 'Fikr va takliflaringiz mahsulotni shakllantiradi.' : 'Your feedback shapes the product.'}
+            </p>
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => onOpenPaymentModal('pro')}
-            icon={<Crown size={14} className="text-amber-400" />}
-            className="text-xs shrink-0 shadow-sm"
-          >
-            {isUz ? 'PRO Obunasini faollashtirish' : 'Upgrade to PRO'}
-          </Button>
         </div>
-      )}
+        <Button variant="outline" size="sm" onClick={onOpenBeta} className="text-xs shrink-0">
+          {isUz ? 'Batafsil' : 'Learn more'}
+        </Button>
+      </div>
 
       {/* User Progress Stats (Fresh: 0 Streak, 0 Quizzes, etc.) */}
       <StudyStats stats={stats} lang={lang} />

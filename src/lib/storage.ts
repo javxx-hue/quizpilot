@@ -1,4 +1,4 @@
-import { StudySet, UserStats, Language, UserTier, SubscriptionInfo, UserProfile, FeedbackItem, PaymentGatewayConfig } from '../types';
+import { StudySet, UserStats, Language } from '../types';
 import { sampleStudySets } from './sampleData';
 
 const STORAGE_KEYS = {
@@ -7,11 +7,6 @@ const STORAGE_KEYS = {
   API_KEY: 'quizpilot_gemini_api_key',
   LANG: 'quizpilot_language',
   THEME: 'quizpilot_theme',
-  TIER: 'quizpilot_user_tier',
-  SUBSCRIPTION: 'quizpilot_subscription_info',
-  USER: 'quizpilot_user_profile',
-  FEEDBACKS: 'quizpilot_user_feedbacks',
-  GATEWAY_CONFIG: 'quizpilot_gateway_config',
 };
 
 // Listeners for reactive updates
@@ -54,8 +49,6 @@ export function resetToFreshState(): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEYS.SETS, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(defaultStats));
-  localStorage.setItem(STORAGE_KEYS.TIER, 'free');
-  localStorage.removeItem(STORAGE_KEYS.SUBSCRIPTION);
   notifyListeners();
 }
 
@@ -202,48 +195,6 @@ export function setSavedTheme(theme: 'light' | 'dark'): void {
 }
 
 // -------------------------------------------------------------
-// Subscription & Paid Tier Management
-// -------------------------------------------------------------
-export function getUserTier(): UserTier {
-  if (typeof window === 'undefined') return 'free';
-  return (localStorage.getItem(STORAGE_KEYS.TIER) as UserTier) || 'free';
-}
-
-export function setUserTier(tier: UserTier, subInfo?: SubscriptionInfo): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.TIER, tier);
-  if (subInfo) {
-    localStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(subInfo));
-  }
-  notifyListeners();
-}
-
-export function getSubscriptionInfo(): SubscriptionInfo | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SUBSCRIPTION);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function cancelSubscription(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.TIER, 'free');
-  const currentSub = getSubscriptionInfo();
-  if (currentSub) {
-    localStorage.setItem(
-      STORAGE_KEYS.SUBSCRIPTION,
-      JSON.stringify({ ...currentSub, status: 'cancelled' })
-    );
-  }
-  notifyListeners();
-}
-
-
-// -------------------------------------------------------------
 // Data Export & Import Helpers
 // -------------------------------------------------------------
 export function exportSetsToJson(): void {
@@ -294,85 +245,3 @@ export function exportFlashcardsToCsv(set: StudySet): void {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-// -------------------------------------------------------------
-// User Authentication Profile
-// -------------------------------------------------------------
-export function getCurrentUser(): UserProfile | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.USER);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function setCurrentUser(user: UserProfile | null): void {
-  if (typeof window === 'undefined') return;
-  if (!user) {
-    localStorage.removeItem(STORAGE_KEYS.USER);
-  } else {
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
-  }
-  notifyListeners();
-}
-
-export function logoutUser(): void {
-  setCurrentUser(null);
-}
-
-// -------------------------------------------------------------
-// Community Feedback / Reviews (Real submissions)
-// -------------------------------------------------------------
-export function getUserFeedbacks(): FeedbackItem[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.FEEDBACKS);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-export function addUserFeedback(data: Omit<FeedbackItem, 'id' | 'date'>): FeedbackItem {
-  const list = getUserFeedbacks();
-  const newItem: FeedbackItem = {
-    ...data,
-    id: `fb_${Date.now()}`,
-    date: new Date().toISOString().split('T')[0],
-  };
-  localStorage.setItem(STORAGE_KEYS.FEEDBACKS, JSON.stringify([newItem, ...list]));
-  notifyListeners();
-  return newItem;
-}
-
-// -------------------------------------------------------------
-// Payment Gateway Configuration (Real Checkout Links)
-// -------------------------------------------------------------
-const defaultGatewayConfig: PaymentGatewayConfig = {
-  stripeProLink: 'https://buy.stripe.com/test_quizpilot_pro',
-  stripeInstitutionLink: 'https://buy.stripe.com/test_quizpilot_institution',
-  paymeMerchantUrl: 'https://checkout.paycom.uz/test_quizpilot',
-  clickMerchantUrl: 'https://my.click.uz/services/pay?service_id=test_quizpilot',
-};
-
-export function getPaymentGatewayConfig(): PaymentGatewayConfig {
-  if (typeof window === 'undefined') return defaultGatewayConfig;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.GATEWAY_CONFIG);
-    if (!raw) return defaultGatewayConfig;
-    return { ...defaultGatewayConfig, ...JSON.parse(raw) };
-  } catch {
-    return defaultGatewayConfig;
-  }
-}
-
-export function setPaymentGatewayConfig(config: PaymentGatewayConfig): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.GATEWAY_CONFIG, JSON.stringify(config));
-  notifyListeners();
-}
-

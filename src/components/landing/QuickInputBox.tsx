@@ -3,7 +3,7 @@ import { FileText, Upload, Youtube, Lightbulb, Sparkles, ArrowRight, CheckCircle
 import { Button } from '../ui/Button';
 import { Language, getTranslations } from '../../lib/i18n';
 import { extractTextFromPdf } from '../../lib/pdfParser';
-import { generateStudySet } from '../../lib/ai';
+import { generateStudySet, describeGenerationError } from '../../lib/ai';
 import { saveStudySet } from '../../lib/storage';
 import { StudySet } from '../../types';
 import { getYouTubeInfo, fetchYouTubeTitle, YouTubeVideoInfo } from '../../lib/youtubeParser';
@@ -57,9 +57,9 @@ export const QuickInputBox: React.FC<QuickInputBoxProps> = ({
       rawContent = await extractTextFromPdf(pdfFile);
       inferredTitle = pdfFile.name.replace(/\.[^/.]+$/, '');
     } else if (activeTab === 'youtube') {
-      if (!videoUrl.trim()) return;
-      rawContent = `YouTube Video Material (${videoUrl}): Title: ${ytTitle || 'Educational Video'}. Comprehensive lecture content, key topic breakdown, and core principles.`;
-      inferredTitle = ytTitle || 'YouTube Video Study Session';
+      // No transcript support yet: the title alone is not study material.
+      toast.error(lang === 'uz' ? 'YouTube videodan yaratish tez orada qo\'shiladi. Hozircha matn yoki PDF yuklang.' : 'YouTube support is coming soon. Use text or PDF for now.');
+      return;
     } else if (activeTab === 'topic') {
       if (!topicPrompt.trim()) return;
       rawContent = `Mavzu va asosiy savollar: ${topicPrompt}. Tushunchalar, formulalar, tarixiy va amaliy faktlar.`;
@@ -83,7 +83,7 @@ export const QuickInputBox: React.FC<QuickInputBoxProps> = ({
       onSetGenerated(generatedSet);
     } catch (e) {
       console.error('Generation failed', e);
-      toast.error(lang === 'uz' ? 'Generatsiyada xatolik yuz berdi' : 'Generation failed');
+      toast.error(describeGenerationError(e, lang));
     } finally {
       setIsGenerating(false);
     }
