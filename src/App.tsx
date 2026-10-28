@@ -34,6 +34,7 @@ import {
   subscribeStorage,
 } from './lib/storage';
 import { Language } from './lib/i18n';
+import { isMastered } from './lib/srs';
 import { StudySet, StudySetType, UserStats } from './types';
 
 type SourceType = 'text' | 'pdf' | 'youtube' | 'topic';
@@ -173,6 +174,10 @@ export default function App() {
 
   const openBeta = () => setIsBetaModalOpen(true);
 
+  // Derived from card states, so re-rating the same card can't inflate it
+  const cardsMastered = studySets.reduce((sum, s) => sum + (s.flashcards?.filter(isMastered).length ?? 0), 0);
+  const dashboardStats = { ...stats, cardsMastered };
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black">
       <Navbar
@@ -207,7 +212,7 @@ export default function App() {
             element={
               <DashboardPage
                 studySets={studySets}
-                stats={stats}
+                stats={dashboardStats}
                 lang={lang}
                 onOpenSet={openSet}
                 onDeleteSet={handleDeleteSet}

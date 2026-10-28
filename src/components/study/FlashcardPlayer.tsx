@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StudySet, Flashcard } from '../../types';
 import { Button } from '../ui/Button';
-import { RotateCw, ArrowLeft, ArrowRight, Shuffle, RotateCcw, Check, Sparkles, Trophy, Maximize, Minimize, Volume2 } from 'lucide-react';
+import { RotateCw, ArrowLeft, ArrowRight, Shuffle, RotateCcw, Check, Trophy, Maximize, Minimize, Volume2, CalendarClock } from 'lucide-react';
 import { Language, getTranslations } from '../../lib/i18n';
-import { recordCardMastered } from '../../lib/storage';
+import { saveStudySet, recordStudyActivity } from '../../lib/storage';
+import { dueQueue, reviewCard, shouldRequeue, nextDueDate, previewIntervals, formatInterval, isMastered, ReviewRating } from '../../lib/srs';
 
 interface FlashcardPlayerProps {
   set: StudySet;
@@ -11,20 +12,36 @@ interface FlashcardPlayerProps {
   onFinish: () => void;
 }
 
+// review: FSRS queue of due cards, ratings are saved and scheduled.
+// practice: flip through every card in order, nothing is scheduled.
+type Mode = 'review' | 'practice';
+
+const RATINGS: { key: ReviewRating; hotkey: string; className: string }[] = [
+  { key: 'again', hotkey: '1', className: 'bg-rose-500/15 hover:bg-rose-500/25 border-rose-500/30 text-rose-800 dark:text-rose-300' },
+  { key: 'hard', hotkey: '2', className: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30 text-amber-800 dark:text-amber-300' },
+  { key: 'good', hotkey: '3', className: 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-800 dark:text-blue-300' },
+  { key: 'easy', hotkey: '4', className: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-800 dark:text-emerald-300' },
+];
+
 export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onFinish }) => {
   const t = getTranslations(lang).flashcards;
-  const initialCards: Flashcard[] = set.flashcards || [];
+  const isUz = lang === 'uz';
 
-  const [cards, setCards] = useState<Flashcard[]>(initialCards);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [deck, setDeck] = useState<Flashcard[]>(set.flashcards || []);
+  const [mode, setMode] = useState<Mode>('review');
+  // Card ids still to show; review mode re-appends cards that come back within minutes
+  const [queue, setQueue] = useState<string[]>(() => dueQueue(set.flashcards || []).map((c) => c.id));
+  const [reviewedCount, setReviewedCount] = useState(0);
+  const [practiceIndex, setPracticeIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const activityRecorded = useRef(false);
 
-  const currentCard = cards[currentIndex];
-  const total = cards.length;
+  const currentId = mode === 'review' ? queue[0] : deck[practiceIndex]?.id;
+  const currentCard = deck.find((c) => c.id === currentId);
+  const noneDue = mode === 'review' && queue.length === 0 && reviewedCount === 0;
 
-  // Toggle fullscreen
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
@@ -33,37 +50,16 @@ export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onF
     }
   };
 
-  // Keyboard shortcut listener
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        setIsFlipped((prev) => !prev);
-      } else if (e.code === 'ArrowRight') {
-        handleNext();
-      } else if (e.code === 'ArrowLeft') {
-        handlePrev();
-      } else if (e.key === '1') {
-        handleRating('again');
-      } else if (e.key === '2') {
-        handleRating('hard');
-      } else if (e.key === '3') {
-        handleRating('good');
-      } else if (e.key === '4') {
-        handleRating('easy');
-      } else if (e.key.toLowerCase() === 'f') {
-        toggleFullscreen();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, isFlipped, cards]);
+  const startPractice = () => {
+    setMode('practice');
+    setPracticeIndex(0);
+    setIsFlipped(false);
+    setIsCompleted(false);
+  };
 
   const handleNext = () => {
-    if (currentIndex < total - 1) {
-      setCurrentIndex((prev) => prev + 1);
+    if (practiceIndex < deck.length - 1) {
+      setPracticeIndex((i) => i + 1);
       setIsFlipped(false);
     } else {
       setIsCompleted(true);
@@ -71,91 +67,161 @@ export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onF
   };
 
   const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
+    if (practiceIndex > 0) {
+      setPracticeIndex((i) => i - 1);
       setIsFlipped(false);
     }
   };
 
-  const handleRating = (rating: 'again' | 'hard' | 'good' | 'easy') => {
-    if (rating === 'good' || rating === 'easy') {
-      recordCardMastered();
+  const handleRating = (rating: ReviewRating) => {
+    if (!currentCard || !isFlipped) return;
+    if (mode === 'practice') {
+      handleNext();
+      return;
     }
-    handleNext();
+
+    const updated = reviewCard(currentCard, rating);
+    const nextDeck = deck.map((c) => (c.id === updated.id ? updated : c));
+    setDeck(nextDeck);
+    saveStudySet({ ...set, flashcards: nextDeck });
+    if (!activityRecorded.current) {
+      recordStudyActivity();
+      activityRecorded.current = true;
+    }
+
+    const rest = queue.slice(1);
+    const nextQueue = shouldRequeue(updated) ? [...rest, updated.id] : rest;
+    setQueue(nextQueue);
+    setReviewedCount((n) => n + 1);
+    setIsFlipped(false);
+    if (nextQueue.length === 0) setIsCompleted(true);
   };
 
   const handleShuffle = () => {
-    const shuffled = [...cards].sort(() => Math.random() - 0.5);
-    setCards(shuffled);
-    setCurrentIndex(0);
+    if (mode === 'review') {
+      setQueue((q) => [...q].sort(() => Math.random() - 0.5));
+    } else {
+      setDeck((d) => [...d].sort(() => Math.random() - 0.5));
+      setPracticeIndex(0);
+    }
     setIsFlipped(false);
-    setIsCompleted(false);
-  };
-
-  const handleReset = () => {
-    setCurrentIndex(0);
-    setIsFlipped(false);
-    setIsCompleted(false);
   };
 
   const handleSpeak = (text: string) => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = lang === 'uz' ? 'tr-TR' : 'en-US';
+      utterance.lang = isUz ? 'tr-TR' : 'en-US';
       utterance.rate = 0.95;
       window.speechSynthesis.speak(utterance);
     }
   };
 
-  if (total === 0 || !currentCard) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsFlipped((prev) => !prev);
+      } else if (mode === 'practice' && e.code === 'ArrowRight') {
+        handleNext();
+      } else if (mode === 'practice' && e.code === 'ArrowLeft') {
+        handlePrev();
+      } else if (e.key.toLowerCase() === 'f') {
+        toggleFullscreen();
+      } else {
+        const r = RATINGS.find((x) => x.hotkey === e.key);
+        if (r) handleRating(r.key);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
+  if (deck.length === 0) {
     return (
-      <div className="max-w-xl mx-auto p-12 text-center bg-card rounded-3xl border border-border">
-        <h3 className="text-xl font-serif font-bold">Kartalar mavjud emas</h3>
-        <Button variant="primary" onClick={onFinish} className="mt-4">Kabinetga qaytish</Button>
+      <div className="max-w-xl mx-auto my-8 p-12 text-center bg-card rounded-3xl border border-border">
+        <h3 className="text-xl font-serif font-bold">{isUz ? 'Kartalar mavjud emas' : 'No cards in this deck'}</h3>
+        <Button variant="primary" onClick={onFinish} className="mt-4">{isUz ? 'Kabinetga qaytish' : 'Back to Dashboard'}</Button>
       </div>
     );
   }
 
-  // Completion State
-  if (isCompleted) {
+  // Nothing due today
+  if (noneDue) {
+    const next = nextDueDate(deck);
+    return (
+      <div className="max-w-xl mx-auto my-8 p-8 sm:p-10 rounded-3xl bg-card border border-border/80 shadow-elevated text-center">
+        <div className="w-20 h-20 rounded-full mx-auto flex items-center justify-center mb-6 bg-creation-flashcards/20 text-creation-flashcards-strong">
+          <CalendarClock size={40} />
+        </div>
+        <h2 className="text-2xl font-serif font-bold text-foreground mb-2">
+          {isUz ? 'Bugun takrorlanadigan karta yo\'q' : 'Nothing due today'}
+        </h2>
+        <p className="text-sm text-muted-foreground mb-8">
+          {next
+            ? isUz
+              ? `Keyingi takrorlash: ${next.toLocaleString('uz-UZ', { dateStyle: 'medium', timeStyle: 'short' })}`
+              : `Next review: ${next.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`
+            : ''}
+        </p>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Button variant="outline" size="md" onClick={startPractice} icon={<RotateCcw size={16} />}>
+            {isUz ? 'Baribir hammasini ko\'rib chiqish' : 'Practice all anyway'}
+          </Button>
+          <Button variant="primary" size="md" onClick={onFinish} icon={<Check size={16} />}>
+            {isUz ? 'Kabinetga qaytish' : 'Back to Dashboard'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isCompleted || !currentCard) {
+    const mastered = deck.filter(isMastered).length;
     return (
       <div className="max-w-xl mx-auto my-8 p-8 sm:p-10 rounded-3xl bg-card border border-border/80 shadow-elevated text-center animate-in zoom-in-95 duration-200">
         <div className="w-20 h-20 rounded-full mx-auto flex items-center justify-center mb-6 bg-creation-flashcards/20 text-creation-flashcards-strong shadow-sm">
           <Trophy size={40} />
         </div>
-        <h2 className="text-3xl font-serif font-bold text-foreground mb-2">
-          {t.completedTitle}
-        </h2>
+        <h2 className="text-3xl font-serif font-bold text-foreground mb-2">{t.completedTitle}</h2>
         <p className="text-sm text-muted-foreground mb-8">
-          {t.completedDesc}
+          {mode === 'review'
+            ? isUz
+              ? `${reviewedCount} ta takrorlash. Yodlangan: ${mastered} / ${deck.length} karta.`
+              : `${reviewedCount} reviews. Mastered: ${mastered} / ${deck.length} cards.`
+            : t.completedDesc}
         </p>
-
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Button variant="outline" size="md" onClick={handleReset} icon={<RotateCcw size={16} />}>
-            {t.reset}
+          <Button variant="outline" size="md" onClick={startPractice} icon={<RotateCcw size={16} />}>
+            {isUz ? 'Hammasini qayta ko\'rish' : 'Practice all'}
           </Button>
           <Button variant="primary" size="md" onClick={onFinish} icon={<Check size={16} />}>
-            {lang === 'uz' ? 'Kabinetga qaytish' : 'Back to Dashboard'}
+            {isUz ? 'Kabinetga qaytish' : 'Back to Dashboard'}
           </Button>
         </div>
       </div>
     );
   }
 
-  const progressPct = ((currentIndex + 1) / total) * 100;
+  const intervals = mode === 'review' ? previewIntervals(currentCard) : null;
+  const progressPct =
+    mode === 'review'
+      ? (reviewedCount / (reviewedCount + queue.length)) * 100
+      : ((practiceIndex + 1) / deck.length) * 100;
 
   return (
     <div className="max-w-2xl mx-auto my-4 sm:my-8 px-4">
-      
       {/* Deck Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-serif font-bold text-foreground">
-            {set.title}
-          </h2>
+          <h2 className="text-xl sm:text-2xl font-serif font-bold text-foreground">{set.title}</h2>
           <span className="text-xs text-muted-foreground">
-            {t.card} {currentIndex + 1} / {total}
+            {mode === 'review'
+              ? isUz
+                ? `Bugun qoldi: ${queue.length} · Takrorlandi: ${reviewedCount}`
+                : `Left today: ${queue.length} · Reviewed: ${reviewedCount}`
+              : `${t.card} ${practiceIndex + 1} / ${deck.length} · ${isUz ? 'mashq rejimi' : 'practice mode'}`}
           </span>
         </div>
 
@@ -163,14 +229,14 @@ export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onF
           <button
             onClick={() => handleSpeak(isFlipped ? currentCard.back : currentCard.front)}
             className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-            title="Ovozli eshitish"
+            title={isUz ? 'Ovozli eshitish' : 'Read aloud'}
           >
             <Volume2 size={16} />
           </button>
           <button
             onClick={toggleFullscreen}
             className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-            title="To'liq ekran (F)"
+            title={isUz ? 'To\'liq ekran (F)' : 'Fullscreen (F)'}
           >
             {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
           </button>
@@ -178,151 +244,103 @@ export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onF
             {t.shuffle}
           </Button>
           <Button variant="ghost" size="sm" onClick={onFinish}>
-            {lang === 'uz' ? 'Chiqish' : 'Exit'}
+            {isUz ? 'Chiqish' : 'Exit'}
           </Button>
         </div>
       </div>
 
       {/* Progress Bar */}
       <div className="w-full h-1.5 rounded-full bg-secondary mb-6 overflow-hidden">
-        <div
-          className="h-full bg-creation-flashcards-strong transition-all duration-300"
-          style={{ width: `${progressPct}%` }}
-        />
+        <div className="h-full bg-creation-flashcards-strong transition-all duration-300" style={{ width: `${progressPct}%` }} />
       </div>
 
       {/* 3D Flip Card Container */}
-      <div
-        className="w-full h-80 sm:h-96 perspective-1000 cursor-pointer select-none mb-6"
-        onClick={() => setIsFlipped(!isFlipped)}
-      >
-        <div
-          className={`relative w-full h-full duration-500 transform-style-preserve-3d transition-transform ${
-            isFlipped ? 'rotate-y-180' : ''
-          }`}
-        >
+      <div className="w-full h-80 sm:h-96 perspective-1000 cursor-pointer select-none mb-6" onClick={() => setIsFlipped(!isFlipped)}>
+        <div className={`relative w-full h-full duration-500 transform-style-preserve-3d transition-transform ${isFlipped ? 'rotate-y-180' : ''}`}>
           {/* Front Side */}
           <div className="absolute inset-0 w-full h-full rounded-3xl bg-card border border-border shadow-elevated p-8 flex flex-col justify-between backface-hidden">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span className="font-semibold uppercase tracking-wider text-creation-flashcards-strong">
-                Savol / Tushuncha
+                {isUz ? 'Savol / Tushuncha' : 'Question / Term'}
               </span>
               <span className="flex items-center gap-1">
                 <RotateCw size={13} />
                 {t.flipHint}
               </span>
             </div>
-
             <div className="my-auto text-center px-4">
-              <h3 className="text-2xl sm:text-3xl font-serif text-foreground font-normal leading-relaxed">
-                {currentCard.front}
-              </h3>
+              <h3 className="text-2xl sm:text-3xl font-serif text-foreground font-normal leading-relaxed">{currentCard.front}</h3>
             </div>
-
             <div className="text-center text-xs text-muted-foreground">
-              [Space] yoki bosish orqali aylantiring
+              {isUz ? '[Space] yoki bosish orqali aylantiring' : 'Press [Space] or click to flip'}
             </div>
           </div>
 
           {/* Back Side */}
           <div className="absolute inset-0 w-full h-full rounded-3xl bg-gradient-to-br from-card via-secondary/20 to-creation-flashcards/10 border border-creation-flashcards/40 shadow-elevated p-8 flex flex-col justify-between backface-hidden rotate-y-180">
             <div className="flex items-center justify-between text-xs text-creation-flashcards-strong font-semibold uppercase tracking-wider">
-              <span>Ta'rif / Javob</span>
-              <span>✓ Ko'rib chiqildi</span>
+              <span>{isUz ? 'Ta\'rif / Javob' : 'Definition / Answer'}</span>
             </div>
-
             <div className="my-auto text-center px-4 space-y-3">
-              <p className="text-lg sm:text-xl font-medium text-foreground leading-relaxed">
-                {currentCard.back}
-              </p>
+              <p className="text-lg sm:text-xl font-medium text-foreground leading-relaxed">{currentCard.back}</p>
               {currentCard.example && (
-                <p className="text-xs sm:text-sm text-muted-foreground italic border-t border-border/50 pt-2">
-                  {currentCard.example}
-                </p>
+                <p className="text-xs sm:text-sm text-muted-foreground italic border-t border-border/50 pt-2">{currentCard.example}</p>
               )}
             </div>
-
             <div className="text-center text-xs text-muted-foreground">
-              Quyidagi reytinglardan birini tanlang
+              {isUz ? 'Qanchalik yaxshi eslaganingizni baholang' : 'Rate how well you remembered'}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Active Recall Rating Buttons */}
+      {/* Rating buttons (after flip) or flip/navigation */}
       {isFlipped ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-4 gap-2 animate-in fade-in">
+        <div className="grid grid-cols-4 gap-2 animate-in fade-in">
+          {RATINGS.map((r) => (
             <button
-              onClick={() => handleRating('again')}
-              className="p-3 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs sm:text-sm font-semibold transition-all flex flex-col items-center gap-1"
+              key={r.key}
+              onClick={() => handleRating(r.key)}
+              className={`p-3 rounded-2xl border text-xs sm:text-sm font-semibold transition-all flex flex-col items-center gap-1 ${r.className}`}
             >
-              <span>{t.ratings.again}</span>
-              <kbd className="text-[10px] font-mono opacity-60">[1]</kbd>
+              <span>{t.ratings[r.key]}</span>
+              <span className="text-[10px] font-mono opacity-70">
+                {intervals ? formatInterval(intervals[r.key], lang) : `[${r.hotkey}]`}
+              </span>
             </button>
-            <button
-              onClick={() => handleRating('hard')}
-              className="p-3 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs sm:text-sm font-semibold transition-all flex flex-col items-center gap-1"
-            >
-              <span>{t.ratings.hard}</span>
-              <kbd className="text-[10px] font-mono opacity-60">[2]</kbd>
-            </button>
-            <button
-              onClick={() => handleRating('good')}
-              className="p-3 rounded-2xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-800 dark:text-blue-300 text-xs sm:text-sm font-semibold transition-all flex flex-col items-center gap-1"
-            >
-              <span>{t.ratings.good}</span>
-              <kbd className="text-[10px] font-mono opacity-60">[3]</kbd>
-            </button>
-            <button
-              onClick={() => handleRating('easy')}
-              className="p-3 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-semibold transition-all flex flex-col items-center gap-1"
-            >
-              <span>{t.ratings.easy}</span>
-              <kbd className="text-[10px] font-mono opacity-60">[4]</kbd>
-            </button>
-          </div>
+          ))}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-4">
-          <Button
-            variant="outline"
-            size="md"
-            onClick={handlePrev}
-            disabled={currentIndex === 0}
-            icon={<ArrowLeft size={16} />}
-          >
-            {lang === 'uz' ? 'Oldingisi' : 'Previous'}
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={() => setIsFlipped(true)}
-            icon={<RotateCw size={15} />}
-          >
+          {mode === 'practice' ? (
+            <Button variant="outline" size="md" onClick={handlePrev} disabled={practiceIndex === 0} icon={<ArrowLeft size={16} />}>
+              {isUz ? 'Oldingisi' : 'Previous'}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button variant="secondary" size="md" onClick={() => setIsFlipped(true)} icon={<RotateCw size={15} />}>
             {t.flipBtn}
           </Button>
-
-          <Button
-            variant="outline"
-            size="md"
-            onClick={handleNext}
-            icon={<ArrowRight size={16} />}
-          >
-            {lang === 'uz' ? 'Keyingisi' : 'Next'}
-          </Button>
+          {mode === 'practice' ? (
+            <Button variant="outline" size="md" onClick={handleNext} icon={<ArrowRight size={16} />}>
+              {isUz ? 'Keyingisi' : 'Next'}
+            </Button>
+          ) : (
+            <span />
+          )}
         </div>
       )}
 
       {/* Keyboard Shortcuts Hint Legend */}
       <div className="mt-6 pt-4 border-t border-border/50 flex flex-wrap items-center justify-center gap-4 text-[11px] text-muted-foreground">
-        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">Space</kbd> Aylantirish</span>
-        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">←</kbd> <kbd className="px-1 py-0.5 rounded bg-secondary border">→</kbd> Navigatsiya</span>
-        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">1-4</kbd> Baholash</span>
-        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">F</kbd> To'liq ekran</span>
+        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">Space</kbd> {isUz ? 'Aylantirish' : 'Flip'}</span>
+        {mode === 'practice' && (
+          <span><kbd className="px-1 py-0.5 rounded bg-secondary border">←</kbd> <kbd className="px-1 py-0.5 rounded bg-secondary border">→</kbd> {isUz ? 'Navigatsiya' : 'Navigate'}</span>
+        )}
+        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">1-4</kbd> {isUz ? 'Baholash' : 'Rate'}</span>
+        <span><kbd className="px-1 py-0.5 rounded bg-secondary border">F</kbd> {isUz ? 'To\'liq ekran' : 'Fullscreen'}</span>
       </div>
-
     </div>
   );
 };

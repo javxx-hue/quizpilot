@@ -16,7 +16,22 @@ export interface Flashcard {
   front: string;
   back: string;
   example?: string;
-  rating?: 'again' | 'hard' | 'good' | 'easy';
+  rating?: 'again' | 'hard' | 'good' | 'easy'; // last rating given
+  srs?: SrsState; // absent until first review
+}
+
+// FSRS card state as stored JSON (dates as ISO strings), see lib/srs.ts
+export interface SrsState {
+  due: string;
+  stability: number;
+  difficulty: number;
+  elapsed_days: number;
+  scheduled_days: number;
+  learning_steps: number;
+  reps: number;
+  lapses: number;
+  state: number; // ts-fsrs State: 0 New, 1 Learning, 2 Review, 3 Relearning
+  last_review?: string;
 }
 
 export interface StudyNote {

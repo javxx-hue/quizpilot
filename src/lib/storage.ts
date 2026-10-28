@@ -113,43 +113,42 @@ export function getUserStats(): UserStats {
   }
 }
 
-export function recordQuizCompletion(scorePercentage: number, questionsCount: number): void {
-  const stats = getUserStats();
-  const today = new Date().toISOString().split('T')[0];
-  
-  let newStreak = stats.streakDays;
-  if (stats.lastStudyDate !== today) {
-    // Check if yesterday or gap
-    const lastDate = new Date(stats.lastStudyDate);
-    const currDate = new Date(today);
-    const diffDays = Math.round((currDate.getTime() - lastDate.getTime()) / (1000 * 3600 * 24));
-    if (diffDays === 1) {
-      newStreak += 1;
-    } else if (diffDays > 1) {
-      newStreak = 1;
-    }
-  }
+// Calendar day in the user's own time zone (toISOString would use UTC,
+// which shifts the day for students in UTC+5 studying after midnight)
+export function localDateKey(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
+export function nextStreak(lastStudyDate: string, streakDays: number, today: string): number {
+  if (lastStudyDate === today) return Math.max(streakDays, 1);
+  if (!lastStudyDate) return 1;
+  const diffDays = Math.round((Date.parse(today) - Date.parse(lastStudyDate)) / 86_400_000);
+  return diffDays === 1 ? streakDays + 1 : 1;
+}
+
+function withStudyDay(stats: UserStats): UserStats {
+  const today = localDateKey();
+  return { ...stats, streakDays: nextStreak(stats.lastStudyDate, stats.streakDays, today), lastStudyDate: today };
+}
+
+export function recordQuizCompletion(scorePercentage: number, questionsCount: number): void {
+  const stats = withStudyDay(getUserStats());
   const updatedStats: UserStats = {
     ...stats,
-    streakDays: newStreak,
-    lastStudyDate: today,
     quizzesTaken: stats.quizzesTaken + 1,
     averageScore: Math.round((stats.averageScore * stats.quizzesTaken + scorePercentage) / (stats.quizzesTaken + 1)),
     totalStudyMinutes: stats.totalStudyMinutes + Math.ceil(questionsCount * 1.5),
   };
-
   localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(updatedStats));
   notifyListeners();
 }
 
-export function recordCardMastered(): void {
-  const stats = getUserStats();
-  const updatedStats: UserStats = {
-    ...stats,
-    cardsMastered: stats.cardsMastered + 1,
-  };
-  localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(updatedStats));
+// Flashcard reviews count toward the streak too
+export function recordStudyActivity(): void {
+  localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(withStudyDay(getUserStats())));
   notifyListeners();
 }
 
