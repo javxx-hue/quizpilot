@@ -1,7 +1,8 @@
--- Week 1 schema: profiles, study sets, private feedback.
--- Run in Supabase: SQL Editor -> paste -> Run (or `supabase db push`).
+-- Full schema. Run in Supabase: SQL Editor -> paste -> Run (or `supabase db push`).
 
+-- ---------------------------------------------------------------
 -- Profiles: one row per auth user, created automatically on sign-up
+-- ---------------------------------------------------------------
 create table public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   full_name text,
@@ -32,32 +33,38 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Study sets: the generated quiz/flashcards/notes/exam is kept as JSON.
--- Week 2 moves the app from localStorage to this table.
+-- ---------------------------------------------------------------
+-- Synced documents. The app keeps the same JSON it stores locally
+-- (src/types), keyed by its own client-generated id per user.
+-- ---------------------------------------------------------------
 create table public.study_sets (
-  id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  type text not null check (type in ('quiz', 'flashcards', 'notes', 'exam')),
-  title text not null check (char_length(title) <= 300),
+  id text not null check (char_length(id) <= 100),
   data jsonb not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
 );
 
-create index study_sets_user_created_idx on public.study_sets (user_id, created_at desc);
+create table public.subjects (
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null check (char_length(id) <= 100),
+  data jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
 
 alter table public.study_sets enable row level security;
+alter table public.subjects enable row level security;
 
-create policy "study_sets: read own" on public.study_sets
-  for select using (auth.uid() = user_id);
-create policy "study_sets: insert own" on public.study_sets
-  for insert with check (auth.uid() = user_id);
-create policy "study_sets: update own" on public.study_sets
-  for update using (auth.uid() = user_id);
-create policy "study_sets: delete own" on public.study_sets
-  for delete using (auth.uid() = user_id);
+create policy "study_sets: own rows" on public.study_sets
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "subjects: own rows" on public.subjects
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
--- Feedback: anyone can send, nobody can read through the API (team reads it in the dashboard)
+-- ---------------------------------------------------------------
+-- Feedback: anyone can send, nobody can read it through the API
+-- (the team reads it in the Supabase dashboard)
+-- ---------------------------------------------------------------
 create table public.feedback (
   id bigint generated always as identity primary key,
   user_id uuid references auth.users (id) on delete set null,
@@ -73,3 +80,73 @@ alter table public.feedback enable row level security;
 create policy "feedback: anyone can insert" on public.feedback
   for insert to anon, authenticated
   with check (user_id is null or user_id = auth.uid());
+
+-- ---------------------------------------------------------------
+-- AI usage per user per day (Edge Function "gemini" enforces the limit)
+-- ---------------------------------------------------------------
+create table public.ai_usage (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  day date not null,
+  count int not null default 0,
+  primary key (user_id, day)
+);
+
+alter table public.ai_usage enable row level security;
+
+create policy "ai_usage: read own" on public.ai_usage
+  for select using (auth.uid() = user_id);
+
+-- Atomically counts one request; false when today's limit is already used up.
+-- Day boundary is Tashkent time.
+create function public.consume_ai_quota(daily_limit int)
+returns boolean
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  used int;
+begin
+  insert into public.ai_usage (user_id, day, count)
+  values (auth.uid(), (now() at time zone 'Asia/Tashkent')::date, 1)
+  on conflict (user_id, day) do update set count = public.ai_usage.count + 1
+  returning count into used;
+  return used <= daily_limit;
+end;
+$$;
+
+revoke execute on function public.consume_ai_quota(int) from public, anon;
+grant execute on function public.consume_ai_quota(int) to authenticated;
+
+-- ---------------------------------------------------------------
+-- Telegram reminders: the app creates a one-time code, the bot links
+-- the chat when the user sends /start <code>
+-- ---------------------------------------------------------------
+create table public.telegram_links (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  link_code text unique,
+  chat_id bigint unique,
+  linked_at timestamptz
+);
+
+alter table public.telegram_links enable row level security;
+
+create policy "telegram_links: read own" on public.telegram_links
+  for select using (auth.uid() = user_id);
+
+create function public.create_telegram_link_code()
+returns text
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  code text := encode(extensions.gen_random_bytes(9), 'hex');
+begin
+  insert into public.telegram_links (user_id, link_code)
+  values (auth.uid(), code)
+  on conflict (user_id) do update set link_code = excluded.link_code;
+  return code;
+end;
+$$;
+
+revoke execute on function public.create_telegram_link_code() from public, anon;
+grant execute on function public.create_telegram_link_code() to authenticated;

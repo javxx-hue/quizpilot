@@ -90,7 +90,7 @@ export const QuizRunner: React.FC<QuizRunnerProps> = ({ set, lang, onFinish, onR
       setShowHint(false);
     } else {
       const finalScore = Math.round(((score + (isCorrect ? 0 : 0)) / totalQ) * 100);
-      recordQuizCompletion(finalScore, totalQ);
+      recordQuizCompletion(finalScore, totalQ, set);
       setIsFinished(true);
     }
   };
@@ -303,6 +303,9 @@ export const QuizRunner: React.FC<QuizRunnerProps> = ({ set, lang, onFinish, onR
             <p className="text-muted-foreground dark:text-foreground/90">
               <strong>{t.explanationTitle}:</strong> {currentQ.explanation}
             </p>
+            {currentQ.source && (
+              <p className="text-[11px] font-semibold opacity-80">📖 {lang === 'uz' ? 'Manba' : 'Source'}: {currentQ.source}</p>
+            )}
           </div>
         )}
 

@@ -3,13 +3,15 @@ import { StudyStats } from '../components/dashboard/StudyStats';
 import { SetCard } from '../components/dashboard/SetCard';
 import { Button } from '../components/ui/Button';
 import { Plus, Search, Sparkles, HelpCircle, Layers, FileText, Timer, Download, Upload, RotateCcw, Crown, Check, BookOpen } from 'lucide-react';
-import { StudySet, StudySetType, UserStats } from '../types';
+import { StudySet, StudySetType, Subject, UserStats } from '../types';
+import { TodayPlan } from '../components/prep/TodayPlan';
 import { Language, getTranslations } from '../lib/i18n';
 import { exportSetsToJson, importSetsFromJson, loadDemoSampleSets, resetToFreshState } from '../lib/storage';
 import { toast } from '../components/ui/Toast';
 
 interface DashboardPageProps {
   studySets: StudySet[];
+  subjects: Subject[];
   stats: UserStats;
   lang: Language;
   onOpenSet: (set: StudySet) => void;
@@ -20,6 +22,7 @@ interface DashboardPageProps {
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   studySets,
+  subjects,
   stats,
   lang,
   onOpenSet,
@@ -139,6 +142,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </Button>
         </div>
       </div>
+
+      <TodayPlan subjects={subjects} studySets={studySets} lang={lang} />
 
       {/* Beta banner (payments are not live yet) */}
       <div className="mb-6 p-4 rounded-2xl bg-secondary/60 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">

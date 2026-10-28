@@ -9,6 +9,7 @@ export interface QuizQuestion {
   correctAnswer: number; // 0-based index
   hint: string;
   explanation: string;
+  source?: string; // where in the material, e.g. "Sahifa 3"
 }
 
 export interface Flashcard {
@@ -16,6 +17,7 @@ export interface Flashcard {
   front: string;
   back: string;
   example?: string;
+  source?: string;
   rating?: 'again' | 'hard' | 'good' | 'easy'; // last rating given
   srs?: SrsState; // absent until first review
 }
@@ -48,6 +50,7 @@ export interface StudySet {
   type: StudySetType;
   description: string;
   createdAt: number;
+  updatedAt?: number; // last local change, used to merge with the cloud copy
   itemCount: number;
   difficulty: Difficulty;
   sourceType: 'text' | 'pdf' | 'youtube' | 'prompt' | 'topic';
@@ -55,6 +58,7 @@ export interface StudySet {
   questions?: QuizQuestion[];
   flashcards?: Flashcard[];
   notes?: StudyNote;
+  subjectId?: string; // set generated inside a subject
   lastScore?: number;
   completedAt?: number;
 }
@@ -83,4 +87,50 @@ export interface UserProfile {
   avatar?: string;
   provider: 'google' | 'email';
   createdAt: string;
+}
+
+// ---------------------------------------------------------------
+// Session prep: subjects, their materials and exam question lists
+// ---------------------------------------------------------------
+export type ExamFormat = 'test' | 'written' | 'oral' | 'mixed';
+export type MaterialKind = 'pdf' | 'pptx' | 'image' | 'text' | 'youtube';
+
+export interface Material {
+  id: string;
+  name: string;
+  kind: MaterialKind;
+  text: string; // extracted text with [Sahifa N] / [Slayd N] markers
+  createdAt: number;
+}
+
+export interface ModelAnswer {
+  summary: string;
+  keyPoints: string[];
+  sources: string[]; // e.g. "Ma'ruza 3.pdf, 5-sahifa"
+}
+
+export interface AnswerAttempt {
+  at: number;
+  answer: string;
+  score: number; // 0-100
+  feedback: string;
+  missing: string[];
+}
+
+export interface ExamQuestion {
+  id: string;
+  text: string;
+  modelAnswer?: ModelAnswer;
+  attempts: AnswerAttempt[];
+}
+
+export interface Subject {
+  id: string;
+  name: string;
+  examDate: string; // YYYY-MM-DD, local
+  examFormat: ExamFormat;
+  createdAt: number;
+  updatedAt: number;
+  materials: Material[];
+  questions: ExamQuestion[];
 }

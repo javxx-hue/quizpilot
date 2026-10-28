@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 import { Language, getTranslations } from '../../lib/i18n';
 import { ApiKeyModal } from './ApiKeyModal';
 import { useAuth } from '../../lib/auth';
+import { connectTelegram, isTelegramConfigured } from '../../lib/telegram';
 import { toast } from '../ui/Toast';
 
 interface NavbarProps {
@@ -38,7 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const t = getTranslations(lang);
 
   const navLinks = [
-    { label: t.nav.features, route: '#features' },
+    { label: lang === 'uz' ? 'Fanlarim' : 'My subjects', route: '/subjects' },
     { label: t.nav.quizzes, route: '/quizzes-ai' },
     { label: t.nav.flashcards, route: '/flashcards-ai' },
     { label: t.nav.notes, route: '/ai-notes' },
@@ -207,6 +208,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     >
                       {lang === 'uz' ? 'Mening to\'plamlarim' : 'My Study Sets'}
                     </button>
+                    {isTelegramConfigured && (
+                      <button
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          connectTelegram().catch(() => toast.error(lang === 'uz' ? 'Telegram ulanmadi' : 'Could not connect Telegram'));
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-secondary rounded-xl font-medium"
+                      >
+                        {lang === 'uz' ? 'Telegram eslatmalari' : 'Telegram reminders'}
+                      </button>
+                    )}
                     <div className="border-t border-border/60 mt-1 pt-1">
                       <button
                         onClick={() => {

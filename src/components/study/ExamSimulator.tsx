@@ -72,7 +72,7 @@ export const ExamSimulator: React.FC<ExamSimulatorProps> = ({ set, lang, onFinis
       }
     });
     const finalPct = Math.round((correctCount / totalQ) * 100);
-    recordQuizCompletion(finalPct, totalQ);
+    recordQuizCompletion(finalPct, totalQ, set);
   };
 
   const currentQ = questions[currentIdx];

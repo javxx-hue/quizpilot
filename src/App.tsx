@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
@@ -11,20 +11,12 @@ import { ToastContainer } from './components/ui/Toast';
 import { Button } from './components/ui/Button';
 
 import { LandingPage } from './pages/LandingPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { QuizzesPage } from './pages/QuizzesPage';
-import { FlashcardsPage } from './pages/FlashcardsPage';
-import { NotesPage } from './pages/NotesPage';
-import { ExamPage } from './pages/ExamPage';
 
-import { QuizRunner } from './components/study/QuizRunner';
-import { FlashcardPlayer } from './components/study/FlashcardPlayer';
-import { NotesViewer } from './components/study/NotesViewer';
-import { ExamSimulator } from './components/study/ExamSimulator';
 
 import {
   initStorage,
   getStudySets,
+  getSubjects,
   getUserStats,
   deleteStudySet,
   getSavedLanguage,
@@ -35,7 +27,23 @@ import {
 } from './lib/storage';
 import { Language } from './lib/i18n';
 import { isMastered } from './lib/srs';
-import { StudySet, StudySetType, UserStats } from './types';
+import { useAuth } from './lib/auth';
+import { startSync } from './lib/sync';
+import { StudySet, StudySetType, Subject, UserStats } from './types';
+
+// Pages load on demand to keep the first download small on mobile data
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const QuizzesPage = lazy(() => import('./pages/QuizzesPage').then((m) => ({ default: m.QuizzesPage })));
+const FlashcardsPage = lazy(() => import('./pages/FlashcardsPage').then((m) => ({ default: m.FlashcardsPage })));
+const NotesPage = lazy(() => import('./pages/NotesPage').then((m) => ({ default: m.NotesPage })));
+const ExamPage = lazy(() => import('./pages/ExamPage').then((m) => ({ default: m.ExamPage })));
+const SubjectsPage = lazy(() => import('./pages/SubjectsPage').then((m) => ({ default: m.SubjectsPage })));
+const SubjectPage = lazy(() => import('./pages/SubjectPage').then((m) => ({ default: m.SubjectPage })));
+const QuestionPracticePage = lazy(() => import('./pages/QuestionPracticePage').then((m) => ({ default: m.QuestionPracticePage })));
+const QuizRunner = lazy(() => import('./components/study/QuizRunner').then((m) => ({ default: m.QuizRunner })));
+const FlashcardPlayer = lazy(() => import('./components/study/FlashcardPlayer').then((m) => ({ default: m.FlashcardPlayer })));
+const NotesViewer = lazy(() => import('./components/study/NotesViewer').then((m) => ({ default: m.NotesViewer })));
+const ExamSimulator = lazy(() => import('./components/study/ExamSimulator').then((m) => ({ default: m.ExamSimulator })));
 
 type SourceType = 'text' | 'pdf' | 'youtube' | 'topic';
 
@@ -89,11 +97,21 @@ export default function App() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // Mirror local data to Supabase while signed in
+  useEffect(() => {
+    if (!user) return;
+    return startSync((status) => {
+      if (status === 'error') console.warn('Cloud sync failed; data is still saved in this browser.');
+    });
+  }, [user?.id]);
 
   const [lang, setLang] = useState<Language>(getSavedLanguage());
   const [theme, setTheme] = useState<'light' | 'dark'>(getSavedTheme());
   const [studySets, setStudySets] = useState<StudySet[]>(getStudySets());
   const [stats, setStats] = useState<UserStats>(getUserStats());
+  const [subjects, setSubjects] = useState<Subject[]>(getSubjects());
 
   // Modals state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -109,6 +127,7 @@ export default function App() {
     const unsubscribe = subscribeStorage(() => {
       setStudySets(getStudySets());
       setStats(getUserStats());
+      setSubjects(getSubjects());
     });
     return () => unsubscribe();
   }, []);
@@ -194,6 +213,7 @@ export default function App() {
       />
 
       <main className="flex-1">
+        <Suspense fallback={<div className="py-24 text-center text-sm text-muted-foreground">{lang === 'uz' ? 'Yuklanmoqda...' : 'Loading...'}</div>}>
         <Routes>
           <Route
             path="/"
@@ -212,6 +232,7 @@ export default function App() {
             element={
               <DashboardPage
                 studySets={studySets}
+                subjects={subjects}
                 stats={dashboardStats}
                 lang={lang}
                 onOpenSet={openSet}
@@ -269,9 +290,13 @@ export default function App() {
               />
             }
           />
+          <Route path="/subjects" element={<SubjectsPage subjects={subjects} studySets={studySets} lang={lang} />} />
+          <Route path="/subjects/:id" element={<SubjectPage subjects={subjects} studySets={studySets} lang={lang} />} />
+          <Route path="/subjects/:id/q/:qid" element={<QuestionPracticePage subjects={subjects} lang={lang} />} />
           <Route path="/study/:id" element={<StudyRoute studySets={studySets} lang={lang} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </main>
 
       <CreationModal

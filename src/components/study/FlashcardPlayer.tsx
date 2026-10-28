@@ -286,6 +286,9 @@ export const FlashcardPlayer: React.FC<FlashcardPlayerProps> = ({ set, lang, onF
               {currentCard.example && (
                 <p className="text-xs sm:text-sm text-muted-foreground italic border-t border-border/50 pt-2">{currentCard.example}</p>
               )}
+              {currentCard.source && (
+                <p className="text-[11px] font-semibold text-muted-foreground">📖 {currentCard.source}</p>
+              )}
             </div>
             <div className="text-center text-xs text-muted-foreground">
               {isUz ? 'Qanchalik yaxshi eslaganingizni baholang' : 'Rate how well you remembered'}
